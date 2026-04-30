@@ -1,0 +1,13 @@
+build/
+explanation/
+node_modules/
+
+data/*.bin
+
+*.o
+*.a
+*.so
+*.out
+
+.vscode/
+.cache/
