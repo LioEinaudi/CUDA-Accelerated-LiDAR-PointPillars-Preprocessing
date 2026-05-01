@@ -34,3 +34,14 @@ target_include_directories(
     test_cpu_pillar PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+add_executable(test_cpu_pillar_scatter
+    tests/test_cpu_pillar_scatter.cpp
+    src/cpu_pillar_scatter.cpp 
+    src/cpu_pillar.cpp
+    )
+
+target_include_directories(
+    test_cpu_pillar_scatter PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
