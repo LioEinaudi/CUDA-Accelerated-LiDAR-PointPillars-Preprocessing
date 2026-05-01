@@ -8,6 +8,7 @@ The current implementation focuses on the first CPU baseline:
 - Load KITTI-style `.bin` point cloud files
 - Apply a CPU range filter
 - Print the original and filtered point counts
+- Test CPU range-filter boundary behavior with hand-written points
 
 The neural network part of PointPillars is intentionally not included yet. The goal is to first understand and accelerate the preprocessing pipeline.
 
@@ -66,6 +67,7 @@ This creates:
 
 ```text
 build/pointpillars_preprocess
+build/test_cpu_range_filter
 ```
 
 ## Run
@@ -85,6 +87,23 @@ Filtered Points: 37920
 
 The exact filtered count depends on the input point cloud.
 
+## Tests
+
+The current test target verifies the CPU range filter with hand-written points instead of reading a KITTI file. It checks in-range points, out-of-range points, and exclusive upper-bound behavior such as `x == max_x`.
+
+Build and run:
+
+```bash
+cmake --build build
+./build/test_cpu_range_filter
+```
+
+Expected output:
+
+```text
+test_cpu_range_filter passed
+```
+
 ## Repository Layout
 
 ```text
@@ -100,6 +119,8 @@ The exact filtered count depends on the input point cloud.
 │   ├── cpu_range_filter.cpp
 │   ├── kitti_reader.cpp
 │   └── main.cpp
+├── tests/
+│   └── test_cpu_range_filter.cpp
 └── data/
     └── 000000.bin
 ```

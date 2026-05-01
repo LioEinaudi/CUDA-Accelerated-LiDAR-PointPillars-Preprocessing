@@ -7,9 +7,20 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_executable(pointpillars_preprocess 
     src/main.cpp
     src/kitti_reader.cpp
-    src/cpu_range_filter.cpp)
+    src/cpu_range_filter.cpp
+    )
 
 target_include_directories( 
     pointpillars_preprocess PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_executable(test_cpu_range_filter
+    tests/test_cpu_range_filter.cpp
+    src/cpu_range_filter.cpp
+    )
+
+target_include_directories( 
+    test_cpu_range_filter PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
