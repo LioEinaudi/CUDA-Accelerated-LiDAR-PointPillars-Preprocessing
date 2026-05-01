@@ -24,3 +24,13 @@ target_include_directories(
     test_cpu_range_filter PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+add_executable(test_cpu_pillar 
+    tests/test_cpu_pillar.cpp
+    src/cpu_pillar.cpp
+    )
+
+target_include_directories( 
+    test_cpu_pillar PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
