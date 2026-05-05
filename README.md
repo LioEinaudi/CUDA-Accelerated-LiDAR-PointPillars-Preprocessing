@@ -9,10 +9,12 @@ The current implementation focuses on the first CPU baseline:
 - Apply a CPU range filter
 - Compute CPU pillar grid dimensions and point-to-pillar coordinates
 - Group filtered points into unique CPU pillars with point counts
+- Store points in fixed-size per-pillar CPU buffers
 - Print the original and filtered point counts
 - Test CPU range-filter boundary behavior with hand-written points
 - Test CPU pillar coordinate behavior with hand-written points
 - Test CPU pillar scatter/grouping behavior with hand-written points
+- Test CPU pillar point storage and max-points truncation
 
 The neural network part of PointPillars is intentionally not included yet. The goal is to first understand and accelerate the preprocessing pipeline.
 
@@ -28,6 +30,8 @@ KITTI .bin
   -> pillar coordinates
   -> cpuPillarScatter
   -> unique pillars and point_to_pillar mapping
+  -> cpuBuildPillarPointStorage
+  -> fixed per-pillar point buffers
   -> point count summary
 ```
 
@@ -93,6 +97,30 @@ pillars         unique non-empty pillars with point counts
 point_to_pillar per-point mapping into the pillars array
 ```
 
+## CPU Pillar Point Storage
+
+The CPU storage step uses the scatter result to place points into a fixed-size per-pillar buffer:
+
+```text
+pillar_points[pillar_index][point_offset]
+```
+
+The implementation stores this logical 2D layout in a 1D contiguous vector:
+
+```text
+index = pillar_index * max_points_per_pillar + point_offset
+```
+
+It also tracks:
+
+```text
+pillar_point_count actual number of stored points per pillar
+pillar_coords       BEV coordinate for each pillar
+num_pillar          number of unique pillars
+```
+
+If more than `max_points_per_pillar` points fall into the same pillar, extra points are truncated.
+
 ## Build
 
 From the project root:
@@ -109,6 +137,7 @@ build/pointpillars_preprocess
 build/test_cpu_range_filter
 build/test_cpu_pillar
 build/test_cpu_pillar_scatter
+build/test_cpu_pillar_storage
 ```
 
 ## Run
@@ -138,6 +167,8 @@ The current test targets use hand-written points instead of reading KITTI files.
 
 `test_cpu_pillar_scatter` verifies pillar key generation, unique pillar grouping, point counts, and per-point pillar indices.
 
+`test_cpu_pillar_storage` verifies fixed-layout indexing, stored point positions, and `max_points_per_pillar` truncation.
+
 Build and run:
 
 ```bash
@@ -145,6 +176,7 @@ cmake --build build
 ./build/test_cpu_range_filter
 ./build/test_cpu_pillar
 ./build/test_cpu_pillar_scatter
+./build/test_cpu_pillar_storage
 ```
 
 Expected output:
@@ -153,6 +185,7 @@ Expected output:
 test_cpu_range_filter passed
 test_cpu_pillar passed
 test_cpu_pillar_scatter passed
+test_cpu_pillar_storage passed
 ```
 
 ## Repository Layout
@@ -165,18 +198,21 @@ test_cpu_pillar_scatter passed
 │   ├── config.hpp
 │   ├── cpu_pillar.hpp
 │   ├── cpu_pillar_scatter.hpp
+│   ├── cpu_pillar_storage.hpp
 │   ├── cpu_preprocess.hpp
 │   ├── kitti_reader.hpp
 │   └── point.hpp
 ├── src/
 │   ├── cpu_pillar.cpp
 │   ├── cpu_pillar_scatter.cpp
+│   ├── cpu_pillar_storage.cpp
 │   ├── cpu_range_filter.cpp
 │   ├── kitti_reader.cpp
 │   └── main.cpp
 ├── tests/
 │   ├── test_cpu_pillar.cpp
 │   ├── test_cpu_pillar_scatter.cpp
+│   ├── test_cpu_pillar_storage.cpp
 │   └── test_cpu_range_filter.cpp
 └── data/
     └── 000000.bin
@@ -188,11 +224,11 @@ Generated build files, local learning notes, and binary point cloud data are not
 
 Planned preprocessing stages:
 
-1. CPU per-pillar point storage with max-points limits
-2. CUDA range filter with atomic compaction
-3. CUDA range filter with prefix-sum compaction
-4. CUDA pillar coordinate computation
-5. CUDA pillar scatter / hash
-6. Pillar feature generation
-7. BEV pseudo-image generation
+1. CPU pillar feature generation
+2. BEV pseudo-image layout
+3. CUDA range filter with atomic compaction
+4. CUDA range filter with prefix-sum compaction
+5. CUDA pillar coordinate computation
+6. CUDA pillar scatter / hash
+7. CUDA pillar feature generation
 8. CPU vs CUDA benchmark and Nsight Compute analysis
