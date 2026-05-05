@@ -10,11 +10,13 @@ The current implementation focuses on the first CPU baseline:
 - Compute CPU pillar grid dimensions and point-to-pillar coordinates
 - Group filtered points into unique CPU pillars with point counts
 - Store points in fixed-size per-pillar CPU buffers
+- Generate 9D CPU pillar features
 - Print the original and filtered point counts
 - Test CPU range-filter boundary behavior with hand-written points
 - Test CPU pillar coordinate behavior with hand-written points
 - Test CPU pillar scatter/grouping behavior with hand-written points
 - Test CPU pillar point storage and max-points truncation
+- Test CPU pillar feature indexing, feature values, and padding
 
 The neural network part of PointPillars is intentionally not included yet. The goal is to first understand and accelerate the preprocessing pipeline.
 
@@ -32,6 +34,8 @@ KITTI .bin
   -> unique pillars and point_to_pillar mapping
   -> cpuBuildPillarPointStorage
   -> fixed per-pillar point buffers
+  -> cpuGeneratePillarFeatures
+  -> 9D per-point pillar features
   -> point count summary
 ```
 
@@ -121,6 +125,36 @@ num_pillar          number of unique pillars
 
 If more than `max_points_per_pillar` points fall into the same pillar, extra points are truncated.
 
+## CPU Pillar Features
+
+The CPU feature step converts stored `PointXYZI` values into a fixed 9D feature tensor:
+
+```text
+[num_pillars, max_points_per_pillar, feature_dim]
+```
+
+The current feature dimension is:
+
+```text
+0: x
+1: y
+2: z
+3: intensity
+4: x - mean_x
+5: y - mean_y
+6: z - mean_z
+7: x - pillar_center_x
+8: y - pillar_center_y
+```
+
+The tensor is stored as a 1D contiguous vector:
+
+```text
+index = (pillar_index * max_points_per_pillar + point_offset) * feature_dim + feature_index
+```
+
+Padding positions remain zero.
+
 ## Build
 
 From the project root:
@@ -138,6 +172,7 @@ build/test_cpu_range_filter
 build/test_cpu_pillar
 build/test_cpu_pillar_scatter
 build/test_cpu_pillar_storage
+build/test_cpu_feature
 ```
 
 ## Run
@@ -169,6 +204,8 @@ The current test targets use hand-written points instead of reading KITTI files.
 
 `test_cpu_pillar_storage` verifies fixed-layout indexing, stored point positions, and `max_points_per_pillar` truncation.
 
+`test_cpu_feature` verifies feature indexing, 9D feature values, and zero padding.
+
 Build and run:
 
 ```bash
@@ -177,6 +214,7 @@ cmake --build build
 ./build/test_cpu_pillar
 ./build/test_cpu_pillar_scatter
 ./build/test_cpu_pillar_storage
+./build/test_cpu_feature
 ```
 
 Expected output:
@@ -186,6 +224,7 @@ test_cpu_range_filter passed
 test_cpu_pillar passed
 test_cpu_pillar_scatter passed
 test_cpu_pillar_storage passed
+test_cpu_feature passed
 ```
 
 ## Repository Layout
@@ -196,6 +235,7 @@ test_cpu_pillar_storage passed
 ├── README.md
 ├── include/
 │   ├── config.hpp
+│   ├── cpu_feature.hpp
 │   ├── cpu_pillar.hpp
 │   ├── cpu_pillar_scatter.hpp
 │   ├── cpu_pillar_storage.hpp
@@ -203,6 +243,7 @@ test_cpu_pillar_storage passed
 │   ├── kitti_reader.hpp
 │   └── point.hpp
 ├── src/
+│   ├── cpu_feature.cpp
 │   ├── cpu_pillar.cpp
 │   ├── cpu_pillar_scatter.cpp
 │   ├── cpu_pillar_storage.cpp
@@ -210,6 +251,7 @@ test_cpu_pillar_storage passed
 │   ├── kitti_reader.cpp
 │   └── main.cpp
 ├── tests/
+│   ├── test_cpu_feature.cpp
 │   ├── test_cpu_pillar.cpp
 │   ├── test_cpu_pillar_scatter.cpp
 │   ├── test_cpu_pillar_storage.cpp
@@ -224,11 +266,10 @@ Generated build files, local learning notes, and binary point cloud data are not
 
 Planned preprocessing stages:
 
-1. CPU pillar feature generation
-2. BEV pseudo-image layout
-3. CUDA range filter with atomic compaction
-4. CUDA range filter with prefix-sum compaction
-5. CUDA pillar coordinate computation
-6. CUDA pillar scatter / hash
-7. CUDA pillar feature generation
-8. CPU vs CUDA benchmark and Nsight Compute analysis
+1. BEV pseudo-image layout
+2. CUDA range filter with atomic compaction
+3. CUDA range filter with prefix-sum compaction
+4. CUDA pillar coordinate computation
+5. CUDA pillar scatter / hash
+6. CUDA pillar feature generation
+7. CPU vs CUDA benchmark and Nsight Compute analysis

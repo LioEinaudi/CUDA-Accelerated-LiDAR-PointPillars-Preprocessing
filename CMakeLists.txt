@@ -57,3 +57,16 @@ target_include_directories(
     test_cpu_pillar_storage PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+add_executable(test_cpu_feature
+    tests/test_cpu_feature.cpp
+    src/cpu_feature.cpp
+    src/cpu_pillar_storage.cpp
+    src/cpu_pillar_scatter.cpp
+    src/cpu_pillar.cpp
+    )
+
+target_include_directories(
+    test_cpu_feature PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
