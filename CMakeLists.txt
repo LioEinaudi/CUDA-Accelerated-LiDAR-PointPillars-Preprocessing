@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.16 ) 
-project(pointpillars_preprocess LANGUAGES CXX) 
+project(pointpillars_preprocess LANGUAGES CXX CUDA) 
 
+set(CMAKE_CUDA_ARCHITECTURES "native")
 set(CMAKE_CXX_STANDARD 17 ) 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -83,3 +84,14 @@ target_include_directories(
     test_cpu_bev PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+add_executable(test_cuda_range_filter
+    tests/test_cuda_range_filter.cpp
+    src/cpu_range_filter.cpp    
+    src/cuda_range_filter.cu
+)
+
+target_include_directories(
+    test_cuda_range_filter PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
