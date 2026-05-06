@@ -11,12 +11,14 @@ The current implementation focuses on the first CPU baseline:
 - Group filtered points into unique CPU pillars with point counts
 - Store points in fixed-size per-pillar CPU buffers
 - Generate 9D CPU pillar features
+- Build a dense CPU BEV pseudo-image from pillar features
 - Print the original and filtered point counts
 - Test CPU range-filter boundary behavior with hand-written points
 - Test CPU pillar coordinate behavior with hand-written points
 - Test CPU pillar scatter/grouping behavior with hand-written points
 - Test CPU pillar point storage and max-points truncation
 - Test CPU pillar feature indexing, feature values, and padding
+- Test CPU BEV indexing, pillar feature averaging, and empty cells
 
 The neural network part of PointPillars is intentionally not included yet. The goal is to first understand and accelerate the preprocessing pipeline.
 
@@ -36,6 +38,8 @@ KITTI .bin
   -> fixed per-pillar point buffers
   -> cpuGeneratePillarFeatures
   -> 9D per-point pillar features
+  -> cpuBuildBevPseudoImage
+  -> dense [C, H, W] BEV pseudo-image
   -> point count summary
 ```
 
@@ -155,6 +159,35 @@ index = (pillar_index * max_points_per_pillar + point_offset) * feature_dim + fe
 
 Padding positions remain zero.
 
+## CPU BEV Pseudo-Image
+
+The CPU BEV step scatters sparse pillar features into a dense pseudo-image:
+
+```text
+[channels, height, width]
+```
+
+For the current simplified baseline, each BEV cell stores the mean feature value over the points inside that pillar:
+
+```text
+bev[channel][pillar_y][pillar_x] =
+    mean(features[pillar_index][point_offset][channel])
+```
+
+The dense tensor is stored as a 1D vector:
+
+```text
+index = (channel * height + y) * width + x
+```
+
+With the default settings, the BEV shape is:
+
+```text
+[9, 496, 432]
+```
+
+Empty cells remain zero.
+
 ## Build
 
 From the project root:
@@ -173,6 +206,7 @@ build/test_cpu_pillar
 build/test_cpu_pillar_scatter
 build/test_cpu_pillar_storage
 build/test_cpu_feature
+build/test_cpu_bev
 ```
 
 ## Run
@@ -206,6 +240,8 @@ The current test targets use hand-written points instead of reading KITTI files.
 
 `test_cpu_feature` verifies feature indexing, 9D feature values, and zero padding.
 
+`test_cpu_bev` verifies BEV indexing, mean aggregation into BEV cells, and zero-valued empty cells.
+
 Build and run:
 
 ```bash
@@ -215,6 +251,7 @@ cmake --build build
 ./build/test_cpu_pillar_scatter
 ./build/test_cpu_pillar_storage
 ./build/test_cpu_feature
+./build/test_cpu_bev
 ```
 
 Expected output:
@@ -225,6 +262,7 @@ test_cpu_pillar passed
 test_cpu_pillar_scatter passed
 test_cpu_pillar_storage passed
 test_cpu_feature passed
+test_cpu_bev passed
 ```
 
 ## Repository Layout
@@ -235,6 +273,7 @@ test_cpu_feature passed
 ├── README.md
 ├── include/
 │   ├── config.hpp
+│   ├── cpu_bev.hpp
 │   ├── cpu_feature.hpp
 │   ├── cpu_pillar.hpp
 │   ├── cpu_pillar_scatter.hpp
@@ -243,6 +282,7 @@ test_cpu_feature passed
 │   ├── kitti_reader.hpp
 │   └── point.hpp
 ├── src/
+│   ├── cpu_bev.cpp
 │   ├── cpu_feature.cpp
 │   ├── cpu_pillar.cpp
 │   ├── cpu_pillar_scatter.cpp
@@ -251,6 +291,7 @@ test_cpu_feature passed
 │   ├── kitti_reader.cpp
 │   └── main.cpp
 ├── tests/
+│   ├── test_cpu_bev.cpp
 │   ├── test_cpu_feature.cpp
 │   ├── test_cpu_pillar.cpp
 │   ├── test_cpu_pillar_scatter.cpp
@@ -266,10 +307,10 @@ Generated build files, local learning notes, and binary point cloud data are not
 
 Planned preprocessing stages:
 
-1. BEV pseudo-image layout
-2. CUDA range filter with atomic compaction
-3. CUDA range filter with prefix-sum compaction
-4. CUDA pillar coordinate computation
-5. CUDA pillar scatter / hash
-6. CUDA pillar feature generation
+1. CUDA range filter with atomic compaction
+2. CUDA range filter with prefix-sum compaction
+3. CUDA pillar coordinate computation
+4. CUDA pillar scatter / hash
+5. CUDA pillar feature generation
+6. CUDA BEV pseudo-image scatter
 7. CPU vs CUDA benchmark and Nsight Compute analysis
