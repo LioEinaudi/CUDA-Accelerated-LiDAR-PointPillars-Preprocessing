@@ -291,9 +291,11 @@ The current test targets use hand-written points instead of reading KITTI files.
 
 `test_cpu_bev` verifies BEV indexing, mean aggregation into BEV cells, and zero-valued empty cells.
 
-`test_cuda_range_filter` verifies that the CUDA atomic range filter returns the same filtered count as the CPU range filter. If no CUDA-capable device is available, the test prints a skip message and exits successfully.
+`test_cuda_range_filter` verifies that the CUDA atomic range filter returns the same filtered count as the CPU range filter.
 
-`test_cuda_range_filter_prefix` verifies that the CUDA prefix-sum range filter matches CPU filtered count and output order. If no CUDA-capable device is available, the test prints a skip message and exits successfully.
+`test_cuda_range_filter_prefix` verifies that the CUDA prefix-sum range filter matches CPU filtered count and output order.
+
+Both CUDA tests have been validated on a local NVIDIA GeForce RTX 4060 Laptop GPU. The tests still handle environments without a visible CUDA device by printing a skip message and exiting successfully.
 
 Build and run:
 
@@ -361,8 +363,6 @@ test_cuda_range_filter_prefix passed
 └── data/
     └── 000000.bin
 ```
-
-Generated build files, local learning notes, and binary point cloud data are not committed.
 
 ## Next Steps
 
