@@ -2,7 +2,7 @@
 
 This project is a step-by-step CUDA learning project for the LiDAR preprocessing stage used by PointPillars-style 3D object detection pipelines.
 
-The current implementation focuses on the first CPU baseline:
+The current implementation builds a complete CPU baseline for LiDAR PointPillars preprocessing and adds CUDA range-filter baselines validated against the CPU baseline.
 
 - Define a KITTI point type: `PointXYZI`
 - Load KITTI-style `.bin` point cloud files
@@ -13,6 +13,7 @@ The current implementation focuses on the first CPU baseline:
 - Generate 9D CPU pillar features
 - Build a dense CPU BEV pseudo-image from pillar features
 - Run a CUDA atomic range filter and compare it with the CPU baseline
+- Run a CUDA prefix-sum range filter and compare it with the CPU baseline
 - Print the original and filtered point counts
 - Test CPU range-filter boundary behavior with hand-written points
 - Test CPU pillar coordinate behavior with hand-written points
@@ -21,6 +22,7 @@ The current implementation focuses on the first CPU baseline:
 - Test CPU pillar feature indexing, feature values, and padding
 - Test CPU BEV indexing, pillar feature averaging, and empty cells
 - Test CUDA range-filter count against the CPU range filter
+- Test CUDA prefix-sum range-filter count and output order against the CPU range filter
 
 The neural network part of PointPillars is intentionally not included yet. The goal is to first understand and accelerate the preprocessing pipeline.
 
@@ -192,7 +194,9 @@ Empty cells remain zero.
 
 ## CUDA Range Filter
 
-The first CUDA preprocessing kernel is an atomic-compaction range filter:
+The first CUDA preprocessing kernels implement range filtering on GPU.
+
+The atomic-compaction version uses:
 
 ```text
 one CUDA thread -> one input point
@@ -223,6 +227,14 @@ CPU filtered count == CUDA filtered count
 
 The atomic version may not preserve the exact same output ordering as the CPU `push_back` baseline, so strict point-by-point order comparison is left for a later validation step.
 
+The prefix-sum compact version uses:
+
+```text
+valid flags -> exclusive scan -> scatter
+```
+
+This computes each valid point's output position from a prefix sum instead of using a shared atomic counter. It preserves input order, so the test compares both count and point values against the CPU baseline.
+
 ## Build
 
 From the project root:
@@ -243,6 +255,7 @@ build/test_cpu_pillar_storage
 build/test_cpu_feature
 build/test_cpu_bev
 build/test_cuda_range_filter
+build/test_cuda_range_filter_prefix
 ```
 
 ## Run
@@ -280,6 +293,8 @@ The current test targets use hand-written points instead of reading KITTI files.
 
 `test_cuda_range_filter` verifies that the CUDA atomic range filter returns the same filtered count as the CPU range filter. If no CUDA-capable device is available, the test prints a skip message and exits successfully.
 
+`test_cuda_range_filter_prefix` verifies that the CUDA prefix-sum range filter matches CPU filtered count and output order. If no CUDA-capable device is available, the test prints a skip message and exits successfully.
+
 Build and run:
 
 ```bash
@@ -291,6 +306,7 @@ cmake --build build
 ./build/test_cpu_feature
 ./build/test_cpu_bev
 ./build/test_cuda_range_filter
+./build/test_cuda_range_filter_prefix
 ```
 
 Expected output:
@@ -303,6 +319,7 @@ test_cpu_pillar_storage passed
 test_cpu_feature passed
 test_cpu_bev passed
 test_cuda_range_filter passed
+test_cuda_range_filter_prefix passed
 ```
 
 ## Repository Layout
@@ -339,7 +356,8 @@ test_cuda_range_filter passed
 │   ├── test_cpu_pillar_scatter.cpp
 │   ├── test_cpu_pillar_storage.cpp
 │   ├── test_cpu_range_filter.cpp
-│   └── test_cuda_range_filter.cpp
+│   ├── test_cuda_range_filter.cpp
+│   └── test_cuda_range_filter_prefix.cpp
 └── data/
     └── 000000.bin
 ```
@@ -350,9 +368,8 @@ Generated build files, local learning notes, and binary point cloud data are not
 
 Planned preprocessing stages:
 
-1. CUDA range filter with prefix-sum compaction
-2. CUDA pillar coordinate computation
-3. CUDA pillar scatter / hash
-4. CUDA pillar feature generation
-5. CUDA BEV pseudo-image scatter
-6. CPU vs CUDA benchmark and Nsight Compute analysis
+1. CUDA pillar coordinate computation
+2. CUDA pillar scatter / hash
+3. CUDA pillar feature generation
+4. CUDA BEV pseudo-image scatter
+5. CPU vs CUDA benchmark and Nsight Compute analysis

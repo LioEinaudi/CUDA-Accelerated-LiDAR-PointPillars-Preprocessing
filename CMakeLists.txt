@@ -95,3 +95,14 @@ target_include_directories(
     test_cuda_range_filter PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
+
+add_executable(test_cuda_range_filter_prefix
+    tests/test_cuda_range_filter_prefix.cpp
+    src/cpu_range_filter.cpp
+    src/cuda_range_filter.cu
+)
+
+target_include_directories(
+    test_cuda_range_filter_prefix PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
