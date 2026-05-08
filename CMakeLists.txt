@@ -106,3 +106,14 @@ target_include_directories(
     test_cuda_range_filter_prefix PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
+
+add_executable(test_cuda_pillar_coord
+    tests/test_cuda_pillar_coord.cpp
+    src/cpu_pillar.cpp
+    src/cuda_pillar_coord.cu
+)
+
+target_include_directories(
+    test_cuda_pillar_coord PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)

@@ -57,7 +57,7 @@ std::vector<PointXYZI> cudaRangeFilterAtomic(
 
     rangeFilterAtomicKernel<<<blocks, threads>>>(d_input, num_points, range, d_output, d_output_count);
 
-    cudaError err = cudaGetLastError();
+    cudaError_t err = cudaGetLastError();
     if ( err != cudaSuccess ) {
         throw std::runtime_error(cudaGetErrorString(err));
     }
@@ -133,7 +133,7 @@ std::vector<PointXYZI>cudaRangeFilterPrefixSum (
     int threads = 256;
     int blocks = ((num_points + threads - 1) / threads);
     markValidKernel<<<blocks, threads>>>(d_input, num_points, range, d_valid_flags);
-    cudaError err = cudaGetLastError(); 
+    cudaError_t err = cudaGetLastError();
     if ( err != cudaSuccess) 
         throw std::runtime_error (cudaGetErrorString(err)) ;
 
