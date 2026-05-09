@@ -4,6 +4,7 @@
 #include"config.hpp"
 #include"cpu_pillar.hpp"
 #include"cpu_pillar_scatter.hpp"
+#include"cpu_pillar_storage.hpp"
 
 std::vector<PointXYZI> cudaRangeFilterAtomic(
     const std::vector<PointXYZI> &points,
@@ -22,3 +23,9 @@ PillarScatterResult cudaPillarScatter(
     const std ::vector<PillarCoord> &coords,
     const RangeConfig &range,
     const PillarConfig &pillar);
+
+PillarPointStorage cudaBuildPillarPointStorage(
+    const std::vector<PointXYZI>&points,
+    const PillarScatterResult & scatter,
+    const PillarConfig & pillar
+);

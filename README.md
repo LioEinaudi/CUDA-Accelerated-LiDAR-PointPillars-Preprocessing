@@ -2,7 +2,7 @@
 
 This project is a step-by-step CUDA learning project for the LiDAR preprocessing stage used by PointPillars-style 3D object detection pipelines.
 
-The current implementation builds a complete CPU baseline for LiDAR PointPillars preprocessing and adds CUDA range-filter, pillar-coordinate, and pillar-scatter baselines validated against the CPU baseline.
+The current implementation builds a complete CPU baseline for LiDAR PointPillars preprocessing and adds CUDA range-filter, pillar-coordinate, pillar-scatter, and pillar-storage baselines validated against the CPU baseline.
 
 - Define a KITTI point type: `PointXYZI`
 - Load KITTI-style `.bin` point cloud files
@@ -16,6 +16,7 @@ The current implementation builds a complete CPU baseline for LiDAR PointPillars
 - Run a CUDA prefix-sum range filter and compare it with the CPU baseline
 - Compute CUDA pillar coordinates and compare them with the CPU baseline
 - Group CUDA pillar coordinates into unique pillars and point-to-pillar mappings
+- Store CUDA pillar points in fixed-size per-pillar buffers
 - Print the original and filtered point counts
 - Test CPU range-filter boundary behavior with hand-written points
 - Test CPU pillar coordinate behavior with hand-written points
@@ -27,6 +28,7 @@ The current implementation builds a complete CPU baseline for LiDAR PointPillars
 - Test CUDA prefix-sum range-filter count and output order against the CPU range filter
 - Test CUDA pillar coordinate output against the CPU pillar coordinate baseline
 - Test CUDA pillar scatter/grouping output with hand-written coordinates
+- Test CUDA pillar point storage and max-points truncation
 
 The neural network part of PointPillars is intentionally not included yet. The goal is to first understand and accelerate the preprocessing pipeline.
 
@@ -272,6 +274,22 @@ key_to_pillar[key] = pillar_index
 
 It uses `atomicCAS` to create each unique pillar once and `atomicAdd` to count points inside each pillar. The test validates semantic output instead of pillar creation order, because CUDA thread scheduling can create pillars in a different order than the CPU baseline.
 
+## CUDA Pillar Storage
+
+The CUDA pillar-storage kernel writes points into a fixed per-pillar layout:
+
+```text
+pillar_points[pillar_index][point_offset]
+```
+
+The implementation stores this as a flat contiguous array:
+
+```text
+index = pillar_index * max_points_per_pillar + point_offset
+```
+
+Each CUDA thread processes one point. It uses one atomic counter to reserve a raw offset inside the pillar, then only saves points whose offset is smaller than `max_points_per_pillar`. A second count records how many points were actually stored, matching the CPU storage semantics.
+
 ## Build
 
 From the project root:
@@ -295,6 +313,7 @@ build/test_cuda_range_filter
 build/test_cuda_range_filter_prefix
 build/test_cuda_pillar_coord
 build/test_cuda_pillar_scatter
+build/test_cuda_pillar_storage
 ```
 
 ## Run
@@ -338,6 +357,8 @@ The current test targets use hand-written points instead of reading KITTI files.
 
 `test_cuda_pillar_scatter` verifies unique pillar grouping, point counts, and per-point pillar mappings for CUDA scatter.
 
+`test_cuda_pillar_storage` verifies fixed-layout CUDA point storage and `max_points_per_pillar` truncation.
+
 The CUDA tests have been validated on a local NVIDIA GeForce RTX 4060 Laptop GPU. The tests still handle environments without a visible CUDA device by printing a skip message and exiting successfully.
 
 Build and run:
@@ -354,6 +375,7 @@ cmake --build build
 ./build/test_cuda_range_filter_prefix
 ./build/test_cuda_pillar_coord
 ./build/test_cuda_pillar_scatter
+./build/test_cuda_pillar_storage
 ```
 
 Expected output:
@@ -369,6 +391,7 @@ test_cuda_range_filter passed
 test_cuda_range_filter_prefix passed
 test_cuda_pillar_coord passed
 test_cuda_pillar_scatter passed
+test_cuda_pillar_storage passed
 ```
 
 ## Repository Layout
@@ -397,6 +420,7 @@ test_cuda_pillar_scatter passed
 │   ├── cpu_range_filter.cpp
 │   ├── cuda_pillar_coord.cu
 │   ├── cuda_pillar_scatter.cu
+│   ├── cuda_pillar_storage.cu
 │   ├── cuda_range_filter.cu
 │   ├── kitti_reader.cpp
 │   └── main.cpp
@@ -409,6 +433,7 @@ test_cuda_pillar_scatter passed
 │   ├── test_cpu_range_filter.cpp
 │   ├── test_cuda_pillar_coord.cpp
 │   ├── test_cuda_pillar_scatter.cpp
+│   ├── test_cuda_pillar_storage.cpp
 │   ├── test_cuda_range_filter.cpp
 │   └── test_cuda_range_filter_prefix.cpp
 └── data/
