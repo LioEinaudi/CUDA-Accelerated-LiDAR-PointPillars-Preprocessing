@@ -3,6 +3,7 @@
 #include"point.hpp"
 #include"config.hpp"
 #include"cpu_pillar.hpp"
+#include"cpu_pillar_scatter.hpp"
 
 std::vector<PointXYZI> cudaRangeFilterAtomic(
     const std::vector<PointXYZI> &points,
@@ -14,5 +15,10 @@ std::vector<PointXYZI> cudaRangeFilterPrefixSum(
 
 std::vector<PillarCoord> cudaComputePillarCoords(
     const std::vector<PointXYZI> &points,
+    const RangeConfig &range,
+    const PillarConfig &pillar);
+
+PillarScatterResult cudaPillarScatter(
+    const std ::vector<PillarCoord> &coords,
     const RangeConfig &range,
     const PillarConfig &pillar);

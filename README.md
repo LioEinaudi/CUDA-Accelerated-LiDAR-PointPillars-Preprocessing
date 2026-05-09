@@ -2,7 +2,7 @@
 
 This project is a step-by-step CUDA learning project for the LiDAR preprocessing stage used by PointPillars-style 3D object detection pipelines.
 
-The current implementation builds a complete CPU baseline for LiDAR PointPillars preprocessing and adds CUDA range-filter and pillar-coordinate baselines validated against the CPU baseline.
+The current implementation builds a complete CPU baseline for LiDAR PointPillars preprocessing and adds CUDA range-filter, pillar-coordinate, and pillar-scatter baselines validated against the CPU baseline.
 
 - Define a KITTI point type: `PointXYZI`
 - Load KITTI-style `.bin` point cloud files
@@ -15,6 +15,7 @@ The current implementation builds a complete CPU baseline for LiDAR PointPillars
 - Run a CUDA atomic range filter and compare it with the CPU baseline
 - Run a CUDA prefix-sum range filter and compare it with the CPU baseline
 - Compute CUDA pillar coordinates and compare them with the CPU baseline
+- Group CUDA pillar coordinates into unique pillars and point-to-pillar mappings
 - Print the original and filtered point counts
 - Test CPU range-filter boundary behavior with hand-written points
 - Test CPU pillar coordinate behavior with hand-written points
@@ -25,6 +26,7 @@ The current implementation builds a complete CPU baseline for LiDAR PointPillars
 - Test CUDA range-filter count against the CPU range filter
 - Test CUDA prefix-sum range-filter count and output order against the CPU range filter
 - Test CUDA pillar coordinate output against the CPU pillar coordinate baseline
+- Test CUDA pillar scatter/grouping output with hand-written coordinates
 
 The neural network part of PointPillars is intentionally not included yet. The goal is to first understand and accelerate the preprocessing pipeline.
 
@@ -253,6 +255,23 @@ N input points -> N output coordinates
 
 So it does not need atomic operations or prefix-sum compaction. Each thread writes directly to `coords[idx]`.
 
+## CUDA Pillar Scatter
+
+The CUDA pillar-scatter kernel groups point coordinates into unique non-empty pillars:
+
+```text
+many PillarCoord values -> unique pillars + point_to_pillar
+```
+
+The first CUDA scatter version uses a dense BEV grid table:
+
+```text
+key = coord.y * grid_x + coord.x
+key_to_pillar[key] = pillar_index
+```
+
+It uses `atomicCAS` to create each unique pillar once and `atomicAdd` to count points inside each pillar. The test validates semantic output instead of pillar creation order, because CUDA thread scheduling can create pillars in a different order than the CPU baseline.
+
 ## Build
 
 From the project root:
@@ -275,6 +294,7 @@ build/test_cpu_bev
 build/test_cuda_range_filter
 build/test_cuda_range_filter_prefix
 build/test_cuda_pillar_coord
+build/test_cuda_pillar_scatter
 ```
 
 ## Run
@@ -316,6 +336,8 @@ The current test targets use hand-written points instead of reading KITTI files.
 
 `test_cuda_pillar_coord` verifies that CUDA pillar-coordinate computation matches the CPU coordinate baseline.
 
+`test_cuda_pillar_scatter` verifies unique pillar grouping, point counts, and per-point pillar mappings for CUDA scatter.
+
 The CUDA tests have been validated on a local NVIDIA GeForce RTX 4060 Laptop GPU. The tests still handle environments without a visible CUDA device by printing a skip message and exiting successfully.
 
 Build and run:
@@ -331,6 +353,7 @@ cmake --build build
 ./build/test_cuda_range_filter
 ./build/test_cuda_range_filter_prefix
 ./build/test_cuda_pillar_coord
+./build/test_cuda_pillar_scatter
 ```
 
 Expected output:
@@ -345,6 +368,7 @@ test_cpu_bev passed
 test_cuda_range_filter passed
 test_cuda_range_filter_prefix passed
 test_cuda_pillar_coord passed
+test_cuda_pillar_scatter passed
 ```
 
 ## Repository Layout
@@ -372,6 +396,7 @@ test_cuda_pillar_coord passed
 │   ├── cpu_pillar_storage.cpp
 │   ├── cpu_range_filter.cpp
 │   ├── cuda_pillar_coord.cu
+│   ├── cuda_pillar_scatter.cu
 │   ├── cuda_range_filter.cu
 │   ├── kitti_reader.cpp
 │   └── main.cpp
@@ -383,6 +408,7 @@ test_cuda_pillar_coord passed
 │   ├── test_cpu_pillar_storage.cpp
 │   ├── test_cpu_range_filter.cpp
 │   ├── test_cuda_pillar_coord.cpp
+│   ├── test_cuda_pillar_scatter.cpp
 │   ├── test_cuda_range_filter.cpp
 │   └── test_cuda_range_filter_prefix.cpp
 └── data/
@@ -393,7 +419,6 @@ test_cuda_pillar_coord passed
 
 Planned preprocessing stages:
 
-1. CUDA pillar scatter / hash
-2. CUDA pillar feature generation
-3. CUDA BEV pseudo-image scatter
-4. CPU vs CUDA benchmark and Nsight Compute analysis
+1. CUDA pillar feature generation
+2. CUDA BEV pseudo-image scatter
+3. CPU vs CUDA benchmark and Nsight Compute analysis

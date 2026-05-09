@@ -117,3 +117,15 @@ target_include_directories(
     test_cuda_pillar_coord PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+add_executable(test_cuda_pillar_scatter
+    tests/test_cuda_pillar_scatter.cpp
+    src/cpu_pillar_scatter.cpp
+    src/cpu_pillar.cpp
+    src/cuda_pillar_scatter.cu
+)
+
+target_include_directories(
+    test_cuda_pillar_scatter PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
