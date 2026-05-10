@@ -6,6 +6,7 @@
 #include"cpu_pillar_scatter.hpp"
 #include"cpu_pillar_storage.hpp"
 #include"cpu_feature.hpp"
+#include"cpu_bev.hpp"
 
 std::vector<PointXYZI> cudaRangeFilterAtomic(
     const std::vector<PointXYZI> &points,
@@ -32,6 +33,12 @@ PillarPointStorage cudaBuildPillarPointStorage(
 );
 
 PillarFeatureTensor cudaGeneratePillarFeatures(
+    const PillarPointStorage &storage,
+    const RangeConfig &range,
+    const PillarConfig &pillar);
+
+BevPseudoImage cudaBuildBevPseudoImage(
+    const PillarFeatureTensor &features,
     const PillarPointStorage &storage,
     const RangeConfig &range,
     const PillarConfig &pillar);

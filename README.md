@@ -2,7 +2,7 @@
 
 This project is a step-by-step CUDA learning project for the LiDAR preprocessing stage used by PointPillars-style 3D object detection pipelines.
 
-The current implementation builds a complete CPU baseline for LiDAR PointPillars preprocessing and adds CUDA range-filter, pillar-coordinate, pillar-scatter, pillar-storage, and pillar-feature baselines validated against the CPU baseline.
+The current implementation builds a complete CPU baseline for LiDAR PointPillars preprocessing and adds CUDA range-filter, pillar-coordinate, pillar-scatter, pillar-storage, pillar-feature, and BEV pseudo-image baselines validated against the CPU baseline.
 
 - Define a KITTI point type: `PointXYZI`
 - Load KITTI-style `.bin` point cloud files
@@ -18,6 +18,7 @@ The current implementation builds a complete CPU baseline for LiDAR PointPillars
 - Group CUDA pillar coordinates into unique pillars and point-to-pillar mappings
 - Store CUDA pillar points in fixed-size per-pillar buffers
 - Generate CUDA 9D pillar features and compare them with the CPU baseline
+- Build a CUDA dense BEV pseudo-image and compare it with the CPU baseline
 - Print the original and filtered point counts
 - Test CPU range-filter boundary behavior with hand-written points
 - Test CPU pillar coordinate behavior with hand-written points
@@ -31,6 +32,7 @@ The current implementation builds a complete CPU baseline for LiDAR PointPillars
 - Test CUDA pillar scatter/grouping output with hand-written coordinates
 - Test CUDA pillar point storage and max-points truncation
 - Test CUDA pillar feature values and zero padding against the CPU baseline
+- Test CUDA BEV pseudo-image values and empty cells against the CPU baseline
 
 The neural network part of PointPillars is intentionally not included yet. The goal is to first understand and accelerate the preprocessing pipeline.
 
@@ -310,6 +312,23 @@ x - center_x, y - center_y
 
 The first CUDA version uses two kernels: one kernel computes per-pillar mean values, and a second kernel writes the 9D feature vector for each valid pillar point. Padding positions remain zero.
 
+## CUDA BEV Pseudo-Image
+
+The CUDA BEV stage scatters sparse pillar features into a dense pseudo-image:
+
+```text
+[num_pillars, max_points_per_pillar, feature_dim]
+  -> [feature_dim, grid_y, grid_x]
+```
+
+The current simplified BEV stage averages each pillar's point features per channel, then writes the result into:
+
+```text
+bev[channel][pillar_y][pillar_x]
+```
+
+Because pillar scatter already produces unique pillar coordinates, the first CUDA BEV version does not need atomics. Each CUDA thread handles one `(pillar_index, channel)` pair.
+
 ## Build
 
 From the project root:
@@ -335,6 +354,7 @@ build/test_cuda_pillar_coord
 build/test_cuda_pillar_scatter
 build/test_cuda_pillar_storage
 build/test_cuda_feature
+build/test_cuda_bev
 ```
 
 ## Run
@@ -382,6 +402,8 @@ The current test targets use hand-written points instead of reading KITTI files.
 
 `test_cuda_feature` verifies CUDA 9D pillar feature values and zero padding against the CPU feature baseline.
 
+`test_cuda_bev` verifies CUDA BEV pseudo-image values and empty cells against the CPU BEV baseline.
+
 The CUDA tests have been validated on a local NVIDIA GeForce RTX 4060 Laptop GPU. The tests still handle environments without a visible CUDA device by printing a skip message and exiting successfully.
 
 Build and run:
@@ -400,6 +422,7 @@ cmake --build build
 ./build/test_cuda_pillar_scatter
 ./build/test_cuda_pillar_storage
 ./build/test_cuda_feature
+./build/test_cuda_bev
 ```
 
 Expected output:
@@ -417,6 +440,7 @@ test_cuda_pillar_coord passed
 test_cuda_pillar_scatter passed
 test_cuda_pillar_storage passed
 test_cuda_feature passed
+test_cuda_bev passed
 ```
 
 ## Repository Layout
@@ -443,6 +467,7 @@ test_cuda_feature passed
 │   ├── cpu_pillar_scatter.cpp
 │   ├── cpu_pillar_storage.cpp
 │   ├── cpu_range_filter.cpp
+│   ├── cuda_bev.cu
 │   ├── cuda_feature.cu
 │   ├── cuda_pillar_coord.cu
 │   ├── cuda_pillar_scatter.cu
@@ -457,6 +482,7 @@ test_cuda_feature passed
 │   ├── test_cpu_pillar_scatter.cpp
 │   ├── test_cpu_pillar_storage.cpp
 │   ├── test_cpu_range_filter.cpp
+│   ├── test_cuda_bev.cpp
 │   ├── test_cuda_feature.cpp
 │   ├── test_cuda_pillar_coord.cpp
 │   ├── test_cuda_pillar_scatter.cpp
@@ -471,5 +497,5 @@ test_cuda_feature passed
 
 Planned preprocessing stages:
 
-1. CUDA BEV pseudo-image scatter
-2. CPU vs CUDA benchmark and Nsight Compute analysis
+1. CPU vs CUDA benchmark
+2. Nsight Compute analysis

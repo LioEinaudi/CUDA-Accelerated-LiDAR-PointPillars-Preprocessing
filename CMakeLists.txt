@@ -153,3 +153,17 @@ target_include_directories(
     test_cuda_feature PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+add_executable(test_cuda_bev
+    tests/test_cuda_bev.cpp
+    src/cpu_bev.cpp
+    src/cpu_feature.cpp
+    src/cpu_pillar_storage.cpp
+    src/cpu_pillar.cpp
+    src/cuda_bev.cu
+)
+
+target_include_directories(
+    test_cuda_bev PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
