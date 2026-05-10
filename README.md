@@ -475,11 +475,11 @@ test_cuda_feature passed
 test_cuda_bev passed
 ```
 
-## Benchmark
+## Benchmark: Stage-wise Wrapper-level Latency
 
 The benchmark currently compares the CPU preprocessing pipeline with the CUDA preprocessing pipeline on one KITTI-style frame. It uses `pillar.max_pillars = 20000` in the benchmark path so the CPU and CUDA pillar counts can match on the tested frame.
 
-The CUDA timing is measured at the C++ wrapper level. That means each CUDA stage may include more than just kernel execution time: host-to-device copies, device-to-host copies, `cudaMalloc`, `cudaFree`, and synchronization can all be part of the measured number. The benchmark also runs a small CUDA warmup before timing to avoid counting first-use CUDA context initialization.
+The current benchmark reports stage-wise C++ wrapper-level latency. Each CUDA stage may include `cudaMalloc`, H2D copies, kernel execution, synchronization, D2H copies, host output allocation, and `cudaFree`. Therefore, this table is intended to expose pipeline-level overhead rather than pure kernel latency. The benchmark also runs a small CUDA warmup before timing to avoid counting first-use CUDA context initialization.
 
 Example result on a local NVIDIA GeForce RTX 4060 Laptop GPU:
 
@@ -500,9 +500,9 @@ BEV size: CPU 1928448, CUDA 1928448
 | BEV | 5.02407 | 10.4525 |
 | Total | 39.3611 | 50.6201 |
 
-In this run, the early CUDA stages are faster than the CPU baseline, while the full CUDA wrapper-level pipeline is still slower overall. A likely reason is that the current implementation is intentionally modular for learning: each stage owns its own memory allocation, transfer, kernel launch, copy-back, and cleanup. The later stages also move larger intermediate buffers between CPU and GPU. The next optimization step is to keep the whole preprocessing pipeline GPU-resident and use CUDA events to separate kernel time from memory-management and transfer time.
+In this run, the early CUDA stages are faster than the CPU baseline, while the full CUDA wrapper-level pipeline is still slower overall. A likely reason is that the current implementation is intentionally modular for learning: each stage owns its own memory allocation, transfer, kernel launch, copy-back, host output construction, and cleanup. The later stages also move larger intermediate buffers between CPU and GPU. The next optimization step is to keep the whole preprocessing pipeline GPU-resident and use CUDA events to separate kernel time from memory-management and transfer time.
 
-## CUDA Timing Breakdown
+## AI-assisted CUDA Timing Breakdown
 
 After the first end-to-end benchmark, I used AI assistance to split the CUDA benchmark into finer timing sections. The goal was to check whether the slower wrapper-level stages were slow because of the CUDA kernels themselves, or because of allocation, host-device transfers, device-host transfers, and CPU-side output buffer creation.
 
@@ -523,14 +523,23 @@ BEV pseudo-image generation
 
 Example result on the same local NVIDIA GeForce RTX 4060 Laptop GPU:
 
-| Stage | Kernel Time | Main Observed Cost |
-| --- | ---: | --- |
-| Range filter | flag `0.010304 ms`, scatter `0.006336 ms`, scan `0.028672 ms` | `cudaMalloc`, H2D/D2H copies, `cudaFree` |
-| Pillar storage | `0.016288 ms` | host output allocation `4.86727 ms`, D2H copy `2.65549 ms` |
-| Pillar feature | mean `0.013024 ms`, feature `0.044032 ms` | host output allocation `19.5231 ms`, D2H copy `6.22539 ms`, H2D copy `2.72125 ms` |
-| BEV | `0.03152 ms` | H2D copy `5.74984 ms`, `cudaFree` `1.35062 ms`, host output allocation `1.00435 ms` |
+| Stage | Wrapper ms | H2D ms | Kernel / GPU ms | Host output alloc ms | D2H ms | Free ms | Notes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Range filter | 0.854504 | 0.127122 | flag 0.010304, scan 0.028672, scatter 0.006336 | 0.019655 | count 0.012071, points 0.0542 | 0.153998 | prefix-sum compaction |
+| Pillar storage | 8.38971 | 0.057832 | 0.016288 | 4.86727 | 2.65549 | 0.686507 | atomicAdd per point |
+| Pillar feature | 30.1683 | 2.72125 | mean 0.013024, feature 0.044032 | 19.5231 | 6.22539 | 1.48574 | mean kernel + feature kernel |
+| BEV | 9.2195 | 5.74984 | 0.03152 | 1.00435 | 0.821527 | 1.35062 | dense output write |
 
-This suggests that the current CUDA kernels are not the main bottleneck in these measured stages. The larger cost appears to come from the teaching-friendly wrapper design: every stage copies intermediate results back to CPU, creates host output vectors, and owns its own temporary device allocations. The next project step is therefore to build a GPU-resident preprocessing pipeline, where intermediate tensors stay on GPU and only final debug or benchmark values are copied back.
+This suggests that the current CUDA kernels are probably not the main bottleneck in these measured stages. The larger cost appears to come from the teaching-friendly wrapper design: every stage copies intermediate results back to CPU, creates host output vectors, and owns its own temporary device allocations. In particular, feature generation spends about `0.057 ms` in its two CUDA kernels, while the wrapper-level time is about `30.168 ms`. The next project step is therefore to build a GPU-resident preprocessing pipeline, where intermediate tensors stay on GPU and only final debug or benchmark values are copied back.
+
+The project can now be viewed as a staged profiling path:
+
+```text
+V0 CPU pipeline
+V1 CUDA modular wrapper pipeline
+V2 CUDA wrapper breakdown: allocation / H2D / kernel / D2H / free
+V3 CUDA GPU-resident pipeline
+```
 
 ## Repository Layout
 
