@@ -1,42 +1,17 @@
 # CUDA-Accelerated LiDAR PointPillars Preprocessing
 
-This project is a step-by-step CUDA learning project for the LiDAR preprocessing stage used by PointPillars-style 3D object detection pipelines.
+This project implements a C++/CUDA LiDAR preprocessing pipeline for PointPillars-style 3D object detection. It includes a CPU reference implementation, CUDA baseline kernels, correctness tests, stage-wise wrapper-level benchmarks, and profiling-oriented optimization planning.
 
-The current implementation builds a complete CPU baseline for LiDAR PointPillars preprocessing and adds CUDA range-filter, pillar-coordinate, pillar-scatter, pillar-storage, pillar-feature, and BEV pseudo-image baselines validated against the CPU baseline.
+The project is developed with an emphasis on correctness, benchmark transparency, and pipeline-level bottleneck analysis. The neural network part of PointPillars is intentionally not included yet; the focus is the preprocessing path from KITTI point clouds to BEV pseudo-image tensors.
 
-- Define a KITTI point type: `PointXYZI`
-- Load KITTI-style `.bin` point cloud files
-- Apply a CPU range filter
-- Compute CPU pillar grid dimensions and point-to-pillar coordinates
-- Group filtered points into unique CPU pillars with point counts
-- Store points in fixed-size per-pillar CPU buffers
-- Generate 9D CPU pillar features
-- Build a dense CPU BEV pseudo-image from pillar features
-- Run a CUDA atomic range filter and compare it with the CPU baseline
-- Run a CUDA prefix-sum range filter and compare it with the CPU baseline
-- Compute CUDA pillar coordinates and compare them with the CPU baseline
-- Group CUDA pillar coordinates into unique pillars and point-to-pillar mappings
-- Store CUDA pillar points in fixed-size per-pillar buffers
-- Generate CUDA 9D pillar features and compare them with the CPU baseline
-- Build a CUDA dense BEV pseudo-image and compare it with the CPU baseline
-- Benchmark the full CPU and CUDA preprocessing pipelines on a KITTI-style frame
-- Use AI-assisted CUDA timing breakdowns to separate kernel time from memory allocation, transfer, and host output allocation time
-- Print the original and filtered point counts
-- Test CPU range-filter boundary behavior with hand-written points
-- Test CPU pillar coordinate behavior with hand-written points
-- Test CPU pillar scatter/grouping behavior with hand-written points
-- Test CPU pillar point storage and max-points truncation
-- Test CPU pillar feature indexing, feature values, and padding
-- Test CPU BEV indexing, pillar feature averaging, and empty cells
-- Test CUDA range-filter count against the CPU range filter
-- Test CUDA prefix-sum range-filter count and output order against the CPU range filter
-- Test CUDA pillar coordinate output against the CPU pillar coordinate baseline
-- Test CUDA pillar scatter/grouping output with hand-written coordinates
-- Test CUDA pillar point storage and max-points truncation
-- Test CUDA pillar feature values and zero padding against the CPU baseline
-- Test CUDA BEV pseudo-image values and empty cells against the CPU baseline
+## Highlights
 
-The neural network part of PointPillars is intentionally not included yet. The goal is to first understand and accelerate the preprocessing pipeline.
+- End-to-end LiDAR preprocessing pipeline from KITTI `.bin` point clouds to BEV pseudo-image.
+- CPU reference implementation for range filtering, pillarization, fixed-size pillar storage, 9D feature generation, and BEV construction.
+- CUDA baseline implementation for each preprocessing stage, validated against the CPU baseline.
+- Correctness tests for CPU and CUDA range filtering, pillar coordinates, scatter, storage, feature generation, and BEV output.
+- Stage-wise wrapper-level benchmark on an RTX 4060 Laptop GPU, with explicit discussion of allocation, transfer, synchronization, host output allocation, and copy-back overhead.
+- Detailed CUDA timing breakdown that separates wrapper-level costs from measured kernel/GPU execution time.
 
 ## Current Pipeline
 
@@ -500,11 +475,11 @@ BEV size: CPU 1928448, CUDA 1928448
 | BEV | 5.02407 | 10.4525 |
 | Total | 39.3611 | 50.6201 |
 
-In this run, the early CUDA stages are faster than the CPU baseline, while the full CUDA wrapper-level pipeline is still slower overall. A likely reason is that the current implementation is intentionally modular for learning: each stage owns its own memory allocation, transfer, kernel launch, copy-back, host output construction, and cleanup. The later stages also move larger intermediate buffers between CPU and GPU. The next optimization step is to keep the whole preprocessing pipeline GPU-resident and use CUDA events to separate kernel time from memory-management and transfer time.
+In this run, the early CUDA stages are faster than the CPU baseline, while the full CUDA wrapper-level pipeline is still slower overall. A likely reason is that the current implementation is intentionally modular: each stage owns its own memory allocation, transfer, kernel launch, copy-back, host output construction, and cleanup. The later stages also move larger intermediate buffers between CPU and GPU. The next optimization step is to keep the whole preprocessing pipeline GPU-resident and use CUDA events to separate kernel time from memory-management and transfer time.
 
-## AI-assisted CUDA Timing Breakdown
+## CUDA Timing Breakdown
 
-After the first end-to-end benchmark, I used AI assistance to split the CUDA benchmark into finer timing sections. The goal was to check whether the slower wrapper-level stages were slow because of the CUDA kernels themselves, or because of allocation, host-device transfers, device-host transfers, and CPU-side output buffer creation.
+After the first end-to-end benchmark, the CUDA benchmark was split into finer timing sections. The goal was to check whether the slower wrapper-level stages were slow because of the CUDA kernels themselves, or because of allocation, host-device transfers, device-host transfers, and CPU-side output buffer creation.
 
 The detailed timing tool is:
 
@@ -530,7 +505,7 @@ Example result on the same local NVIDIA GeForce RTX 4060 Laptop GPU:
 | Pillar feature | 30.1683 | 2.72125 | mean 0.013024, feature 0.044032 | 19.5231 | 6.22539 | 1.48574 | mean kernel + feature kernel |
 | BEV | 9.2195 | 5.74984 | 0.03152 | 1.00435 | 0.821527 | 1.35062 | dense output write |
 
-This suggests that the current CUDA kernels are probably not the main bottleneck in these measured stages. The larger cost appears to come from the teaching-friendly wrapper design: every stage copies intermediate results back to CPU, creates host output vectors, and owns its own temporary device allocations. In particular, feature generation spends about `0.057 ms` in its two CUDA kernels, while the wrapper-level time is about `30.168 ms`. The next project step is therefore to build a GPU-resident preprocessing pipeline, where intermediate tensors stay on GPU and only final debug or benchmark values are copied back.
+This suggests that the current CUDA kernels are probably not the main bottleneck in these measured stages. The larger cost appears to come from the modular wrapper design: every stage copies intermediate results back to CPU, creates host output vectors, and owns its own temporary device allocations. In particular, feature generation spends about `0.057 ms` in its two CUDA kernels, while the wrapper-level time is about `30.168 ms`. The next project step is therefore to build a GPU-resident preprocessing pipeline, where intermediate tensors stay on GPU and only final debug or benchmark values are copied back.
 
 The project can now be viewed as a staged profiling path:
 
