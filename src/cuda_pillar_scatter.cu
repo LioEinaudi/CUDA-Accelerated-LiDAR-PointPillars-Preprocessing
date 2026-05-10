@@ -10,6 +10,7 @@ __global__ void pillarScatterKernel(
     const PillarCoord *coords,
     int num_points,
     int grid_x,
+    int grid_size,
     int max_pillars,
     int *key_to_pillar,
     PillarInfo *pillars,
@@ -21,6 +22,11 @@ __global__ void pillarScatterKernel(
 
     PillarCoord coord = coords[idx];
     int key = coord.x + grid_x * coord.y;
+    if (key < 0 || key >= grid_size) {
+        point_to_pillar[idx] = -1;
+        return;
+    }
+
     int old = atomicCAS(&key_to_pillar[key], -1, -2);
     int pillar_index; 
     if (old == -1)
@@ -30,17 +36,17 @@ __global__ void pillarScatterKernel(
             pillars[pillar_index].coord = coord;
             pillars[pillar_index].point_count = 0;
             __threadfence();
-            key_to_pillar[key] = pillar_index;
+            atomicExch(&key_to_pillar[key], pillar_index);
         }
         else {
-            key_to_pillar[key] = -1;
+            atomicExch(&key_to_pillar[key], -1);
             point_to_pillar[idx] = -1;
             return;
         }
     }
     else if ( old== -2 ){
         do{
-            pillar_index = key_to_pillar[key];
+            pillar_index = atomicAdd(&key_to_pillar[key], 0);
         } while (pillar_index == -2);
     }
     else {
@@ -87,7 +93,7 @@ PillarScatterResult cudaPillarScatter(
 
     int threads = 256;
     int blocks = (num_points + threads - 1) / threads;
-    pillarScatterKernel<<<blocks, threads>>>(d_coords, num_points, grid_x, pillar.max_pillars, d_key_to_pillar, d_pillars, d_point_to_pillar, d_num_pillars);
+    pillarScatterKernel<<<blocks, threads>>>(d_coords, num_points, grid_x, grid_size, pillar.max_pillars, d_key_to_pillar, d_pillars, d_point_to_pillar, d_num_pillars);
     
     cudaError_t err = cudaGetLastError(); 
     if ( err != cudaSuccess )

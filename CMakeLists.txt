@@ -167,3 +167,26 @@ target_include_directories(
     test_cuda_bev PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+add_executable(benchmark
+    src/benchmark.cpp
+    src/kitti_reader.cpp
+    src/cpu_bev.cpp
+    src/cpu_feature.cpp
+    src/cpu_pillar_storage.cpp
+    src/cpu_pillar.cpp
+    src/cpu_range_filter.cpp
+    src/cpu_pillar_scatter.cpp
+    src/cuda_bev.cu
+    src/cuda_feature.cu
+    src/cuda_pillar_coord.cu
+    src/cuda_pillar_scatter.cu
+    src/cuda_pillar_storage.cu
+    src/cuda_range_filter.cu
+)
+
+target_include_directories(
+    benchmark PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+

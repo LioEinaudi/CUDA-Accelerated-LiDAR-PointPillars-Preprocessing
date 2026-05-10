@@ -19,6 +19,7 @@ The current implementation builds a complete CPU baseline for LiDAR PointPillars
 - Store CUDA pillar points in fixed-size per-pillar buffers
 - Generate CUDA 9D pillar features and compare them with the CPU baseline
 - Build a CUDA dense BEV pseudo-image and compare it with the CPU baseline
+- Benchmark the full CPU and CUDA preprocessing pipelines on a KITTI-style frame
 - Print the original and filtered point counts
 - Test CPU range-filter boundary behavior with hand-written points
 - Test CPU pillar coordinate behavior with hand-written points
@@ -55,6 +56,20 @@ KITTI .bin
   -> cpuBuildBevPseudoImage
   -> dense [C, H, W] BEV pseudo-image
   -> point count summary
+```
+
+The CUDA side follows the same logical preprocessing order:
+
+```text
+KITTI .bin
+  -> readKittiBin
+  -> cudaRangeFilterPrefixSum
+  -> cudaComputePillarCoords
+  -> cudaPillarScatter
+  -> cudaBuildPillarPointStorage
+  -> cudaGeneratePillarFeatures
+  -> cudaBuildBevPseudoImage
+  -> CPU/CUDA count and timing summary
 ```
 
 ## KITTI Point Format
@@ -355,6 +370,7 @@ build/test_cuda_pillar_scatter
 build/test_cuda_pillar_storage
 build/test_cuda_feature
 build/test_cuda_bev
+build/benchmark
 ```
 
 ## Run
@@ -373,6 +389,12 @@ Filtered Points: 37920
 ```
 
 The exact filtered count depends on the input point cloud.
+
+Run the benchmark with a KITTI-style `.bin` file:
+
+```bash
+./build/benchmark data/000000.bin
+```
 
 ## Tests
 
@@ -423,6 +445,7 @@ cmake --build build
 ./build/test_cuda_pillar_storage
 ./build/test_cuda_feature
 ./build/test_cuda_bev
+./build/benchmark data/000000.bin
 ```
 
 Expected output:
@@ -442,6 +465,33 @@ test_cuda_pillar_storage passed
 test_cuda_feature passed
 test_cuda_bev passed
 ```
+
+## Benchmark
+
+The benchmark currently compares the CPU preprocessing pipeline with the CUDA preprocessing pipeline on one KITTI-style frame. It uses `pillar.max_pillars = 20000` in the benchmark path so the CPU and CUDA pillar counts can match on the tested frame.
+
+The CUDA timing is measured at the C++ wrapper level. That means each CUDA stage may include more than just kernel execution time: host-to-device copies, device-to-host copies, `cudaMalloc`, `cudaFree`, and synchronization can all be part of the measured number. The benchmark also runs a small CUDA warmup before timing to avoid counting first-use CUDA context initialization.
+
+Example result on a local NVIDIA GeForce RTX 4060 Laptop GPU:
+
+```text
+Input points: 120000
+Filtered points: CPU 17353, CUDA 17353
+Pillars: CPU 16645, CUDA 16645
+BEV size: CPU 1928448, CUDA 1928448
+```
+
+| Stage | CPU ms | CUDA wrapper ms |
+| --- | ---: | ---: |
+| Range filter | 1.55536 | 0.622642 |
+| Pillar coord | included in scatter path | 0.192323 |
+| Scatter | 3.73143 | 0.318826 |
+| Storage | 7.63388 | 9.97151 |
+| Feature | 21.4164 | 29.0623 |
+| BEV | 5.02407 | 10.4525 |
+| Total | 39.3611 | 50.6201 |
+
+In this run, the early CUDA stages are faster than the CPU baseline, while the full CUDA wrapper-level pipeline is still slower overall. A likely reason is that the current implementation is intentionally modular for learning: each stage owns its own memory allocation, transfer, kernel launch, copy-back, and cleanup. The later stages also move larger intermediate buffers between CPU and GPU. The next optimization step is to keep the whole preprocessing pipeline GPU-resident and use CUDA events to separate kernel time from memory-management and transfer time.
 
 ## Repository Layout
 
@@ -473,6 +523,7 @@ test_cuda_bev passed
 │   ├── cuda_pillar_scatter.cu
 │   ├── cuda_pillar_storage.cu
 │   ├── cuda_range_filter.cu
+│   ├── benchmark.cpp
 │   ├── kitti_reader.cpp
 │   └── main.cpp
 ├── tests/
@@ -495,7 +546,9 @@ test_cuda_bev passed
 
 ## Next Steps
 
-Planned preprocessing stages:
+Planned optimization stages:
 
-1. CPU vs CUDA benchmark
-2. Nsight Compute analysis
+1. Keep the CUDA preprocessing pipeline GPU-resident instead of copying every stage back to CPU.
+2. Split benchmark timing into allocation, copy, kernel, and copy-back time with CUDA events.
+3. Use Nsight Systems or Nsight Compute to inspect storage, feature, and BEV bottlenecks.
+4. Run benchmark results on more KITTI frames and report average latency.
