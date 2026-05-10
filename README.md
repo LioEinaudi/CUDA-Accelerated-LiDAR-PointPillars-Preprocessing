@@ -20,6 +20,7 @@ The current implementation builds a complete CPU baseline for LiDAR PointPillars
 - Generate CUDA 9D pillar features and compare them with the CPU baseline
 - Build a CUDA dense BEV pseudo-image and compare it with the CPU baseline
 - Benchmark the full CPU and CUDA preprocessing pipelines on a KITTI-style frame
+- Use AI-assisted CUDA timing breakdowns to separate kernel time from memory allocation, transfer, and host output allocation time
 - Print the original and filtered point counts
 - Test CPU range-filter boundary behavior with hand-written points
 - Test CPU pillar coordinate behavior with hand-written points
@@ -371,6 +372,7 @@ build/test_cuda_pillar_storage
 build/test_cuda_feature
 build/test_cuda_bev
 build/benchmark
+build/benchmark_cuda_timing
 ```
 
 ## Run
@@ -394,6 +396,12 @@ Run the benchmark with a KITTI-style `.bin` file:
 
 ```bash
 ./build/benchmark data/000000.bin
+```
+
+Run the detailed CUDA timing breakdown:
+
+```bash
+./build/benchmark_cuda_timing data/000000.bin
 ```
 
 ## Tests
@@ -446,6 +454,7 @@ cmake --build build
 ./build/test_cuda_feature
 ./build/test_cuda_bev
 ./build/benchmark data/000000.bin
+./build/benchmark_cuda_timing data/000000.bin
 ```
 
 Expected output:
@@ -493,6 +502,36 @@ BEV size: CPU 1928448, CUDA 1928448
 
 In this run, the early CUDA stages are faster than the CPU baseline, while the full CUDA wrapper-level pipeline is still slower overall. A likely reason is that the current implementation is intentionally modular for learning: each stage owns its own memory allocation, transfer, kernel launch, copy-back, and cleanup. The later stages also move larger intermediate buffers between CPU and GPU. The next optimization step is to keep the whole preprocessing pipeline GPU-resident and use CUDA events to separate kernel time from memory-management and transfer time.
 
+## CUDA Timing Breakdown
+
+After the first end-to-end benchmark, I used AI assistance to split the CUDA benchmark into finer timing sections. The goal was to check whether the slower wrapper-level stages were slow because of the CUDA kernels themselves, or because of allocation, host-device transfers, device-host transfers, and CPU-side output buffer creation.
+
+The detailed timing tool is:
+
+```text
+build/benchmark_cuda_timing
+```
+
+It currently breaks down:
+
+```text
+range filter
+pillar storage
+pillar feature generation
+BEV pseudo-image generation
+```
+
+Example result on the same local NVIDIA GeForce RTX 4060 Laptop GPU:
+
+| Stage | Kernel Time | Main Observed Cost |
+| --- | ---: | --- |
+| Range filter | flag `0.010304 ms`, scatter `0.006336 ms`, scan `0.028672 ms` | `cudaMalloc`, H2D/D2H copies, `cudaFree` |
+| Pillar storage | `0.016288 ms` | host output allocation `4.86727 ms`, D2H copy `2.65549 ms` |
+| Pillar feature | mean `0.013024 ms`, feature `0.044032 ms` | host output allocation `19.5231 ms`, D2H copy `6.22539 ms`, H2D copy `2.72125 ms` |
+| BEV | `0.03152 ms` | H2D copy `5.74984 ms`, `cudaFree` `1.35062 ms`, host output allocation `1.00435 ms` |
+
+This suggests that the current CUDA kernels are not the main bottleneck in these measured stages. The larger cost appears to come from the teaching-friendly wrapper design: every stage copies intermediate results back to CPU, creates host output vectors, and owns its own temporary device allocations. The next project step is therefore to build a GPU-resident preprocessing pipeline, where intermediate tensors stay on GPU and only final debug or benchmark values are copied back.
+
 ## Repository Layout
 
 ```text
@@ -524,6 +563,7 @@ In this run, the early CUDA stages are faster than the CPU baseline, while the f
 │   ├── cuda_pillar_storage.cu
 │   ├── cuda_range_filter.cu
 │   ├── benchmark.cpp
+│   ├── benchmark_cuda_timing.cu
 │   ├── kitti_reader.cpp
 │   └── main.cpp
 ├── tests/
@@ -549,6 +589,7 @@ In this run, the early CUDA stages are faster than the CPU baseline, while the f
 Planned optimization stages:
 
 1. Keep the CUDA preprocessing pipeline GPU-resident instead of copying every stage back to CPU.
-2. Split benchmark timing into allocation, copy, kernel, and copy-back time with CUDA events.
-3. Use Nsight Systems or Nsight Compute to inspect storage, feature, and BEV bottlenecks.
-4. Run benchmark results on more KITTI frames and report average latency.
+2. Start with a fused CUDA pipeline for range filter, pillar coordinate, and pillar scatter.
+3. Extend the GPU-resident pipeline to storage, feature generation, and BEV pseudo-image generation.
+4. Use Nsight Systems or Nsight Compute to inspect the remaining bottlenecks.
+5. Run benchmark results on more KITTI frames and report average latency.

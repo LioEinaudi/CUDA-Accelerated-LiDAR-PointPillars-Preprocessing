@@ -190,3 +190,18 @@ target_include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+add_executable(benchmark_cuda_timing
+    src/benchmark_cuda_timing.cu
+    src/kitti_reader.cpp
+    src/cpu_bev.cpp
+    src/cpu_feature.cpp
+    src/cpu_pillar_storage.cpp
+    src/cpu_pillar.cpp
+    src/cpu_range_filter.cpp
+    src/cpu_pillar_scatter.cpp
+)
+
+target_include_directories(
+    benchmark_cuda_timing PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
