@@ -6,6 +6,7 @@ struct CudaPipelineSummary{
     int filtered_count=0;
     int num_pillars=0;
     int stored_points = 0;
+    // float feature_values = 0.0f;
 };
 
 CudaPipelineSummary cudaPreprocessPipelineV1(
@@ -14,6 +15,16 @@ CudaPipelineSummary cudaPreprocessPipelineV1(
     const PillarConfig &pillar);
 
 CudaPipelineSummary cudaPreprocessPipelineV2(
+    const std::vector<PointXYZI> &points,
+    const RangeConfig &range,
+    const PillarConfig &pillar);
+
+CudaPipelineSummary cudaPreprocessPipelineV3(
+    const std::vector<PointXYZI> &points,
+    const RangeConfig &range,
+    const PillarConfig &pillar);
+
+CudaPipelineSummary cudaPreprocessPipelineV4(
     const std::vector<PointXYZI> &points,
     const RangeConfig &range,
     const PillarConfig &pillar);

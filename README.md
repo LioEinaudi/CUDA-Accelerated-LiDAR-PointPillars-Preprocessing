@@ -349,10 +349,13 @@ build/test_cuda_feature
 build/test_cuda_bev
 build/test_cuda_pipelinev1
 build/test_cuda_pipelinev2
+build/test_cuda_pipelinev3
 build/benchmark
 build/benchmark_cuda_timing
 build/benchmark_cuda_pipelinev1
 build/benchmark_cuda_pipelinev2
+build/benchmark_cuda_pipelinev3
+build/benchmark_cuda_pipelinev4
 ```
 
 ## Run
@@ -389,6 +392,8 @@ Run the GPU-resident pipeline benchmarks:
 ```bash
 ./build/benchmark_cuda_pipelinev1 data/000000.bin
 ./build/benchmark_cuda_pipelinev2 data/000000.bin
+./build/benchmark_cuda_pipelinev3 data/000000.bin
+./build/benchmark_cuda_pipelinev4 data/000000.bin
 ```
 
 ## Tests
@@ -425,6 +430,8 @@ The current test targets use hand-written points instead of reading KITTI files.
 
 `test_cuda_pipelinev2` verifies the GPU-resident pipeline after adding pillar storage, including filtered count, pillar count, and stored point count.
 
+`test_cuda_pipelinev3` verifies that the GPU-resident pipeline can extend through pillar feature generation while preserving the filtered count, pillar count, and stored point count. The full feature tensor is intentionally not copied back in the pipeline benchmark path.
+
 The CUDA tests have been validated on a local NVIDIA GeForce RTX 4060 Laptop GPU. The tests still handle environments without a visible CUDA device by printing a skip message and exiting successfully.
 
 Build and run:
@@ -446,10 +453,13 @@ cmake --build build
 ./build/test_cuda_bev
 ./build/test_cuda_pipelinev1
 ./build/test_cuda_pipelinev2
+./build/test_cuda_pipelinev3
 ./build/benchmark data/000000.bin
 ./build/benchmark_cuda_timing data/000000.bin
 ./build/benchmark_cuda_pipelinev1 data/000000.bin
 ./build/benchmark_cuda_pipelinev2 data/000000.bin
+./build/benchmark_cuda_pipelinev3 data/000000.bin
+./build/benchmark_cuda_pipelinev4 data/000000.bin
 ```
 
 Expected output:
@@ -470,6 +480,7 @@ test_cuda_feature passed
 test_cuda_bev passed
 test_cuda_pipeline passed
 test_cuda_pipelinev2 passed
+test_cuda_pipelinev3 passed
 ```
 
 ## Benchmark: Stage-wise Wrapper-level Latency
@@ -535,7 +546,7 @@ The project can now be viewed as a staged profiling path:
 V0 CPU pipeline
 V1 CUDA modular wrapper pipeline
 V2 CUDA wrapper breakdown: allocation / H2D / kernel / D2H / free
-V3 CUDA GPU-resident pipeline
+V3/V4 CUDA GPU-resident pipeline
 ```
 
 ## GPU-resident Pipeline Benchmarks
@@ -554,7 +565,28 @@ Pipeline V2 extends V1 with:
 pillar storage
 ```
 
-Both versions are validated against the CPU reference counts before comparing latency.
+Pipeline V3 extends V2 with:
+
+```text
+pillar feature generation
+```
+
+Pipeline V4 extends V3 with:
+
+```text
+BEV pseudo-image generation
+```
+
+The pipeline benchmarks are validated against CPU reference summary counts before comparing latency. V3 and V4 intentionally keep large intermediate tensors on the GPU: V3 skips full feature D2H copy-back, and V4 skips both full feature and BEV D2H copy-back. Therefore, these speedups compare GPU-resident preprocessing latency against modular CUDA wrapper latency, not full host-visible output export latency.
+
+Summary on one KITTI-style frame:
+
+| Pipeline | Stages Included | CUDA modular ms | GPU-resident ms | Speedup |
+| --- | --- | ---: | ---: | ---: |
+| V1 | range + coord + scatter | 0.983315 | 0.623737 | 1.57649x |
+| V2 | + storage | 12.1325 | 1.63467 | 7.42194x |
+| V3 | + feature | 44.2121 | 4.10545 | 10.7691x |
+| V4 | + BEV | 62.091 | 3.69822 | 16.7895x |
 
 ### Pipeline V1
 
@@ -610,6 +642,70 @@ Result on the same KITTI-style frame:
 
 The much larger V2 gain is consistent with the earlier timing breakdown: the storage kernel itself is inexpensive, while the modular storage wrapper spends most of its time in host output allocation and device-host transfer. Keeping storage inside the GPU-resident pipeline removes that large intermediate round trip.
 
+### Pipeline V3
+
+V3 compares the modular CUDA wrappers:
+
+```text
+cudaRangeFilterPrefixSum
+cudaComputePillarCoords
+cudaPillarScatter
+cudaBuildPillarPointStorage
+cudaGeneratePillarFeatures
+```
+
+against:
+
+```text
+cudaPreprocessPipelineV3
+```
+
+Result on the same KITTI-style frame:
+
+| Metric | CUDA modular V3 | CUDA pipeline V3 |
+| --- | ---: | ---: |
+| Total latency | 44.2121 ms | 4.10545 ms |
+| Filtered count | 17353 | 17353 |
+| Pillars | 16645 | 16645 |
+| Stored points | 17353 | 17353 |
+| Feature values | 14980500 | skipped copy-back |
+| Speedup | - | 10.7691x |
+
+The modular feature wrapper still materializes the full feature tensor on the CPU, while the V3 pipeline keeps that tensor on GPU. This makes the benchmark useful for measuring GPU-resident preprocessing latency, but it is not claiming that the full feature tensor has been exported to host memory.
+
+### Pipeline V4
+
+V4 compares the modular CUDA wrappers:
+
+```text
+cudaRangeFilterPrefixSum
+cudaComputePillarCoords
+cudaPillarScatter
+cudaBuildPillarPointStorage
+cudaGeneratePillarFeatures
+cudaBuildBevPseudoImage
+```
+
+against:
+
+```text
+cudaPreprocessPipelineV4
+```
+
+Result on the same KITTI-style frame:
+
+| Metric | CUDA modular V4 | CUDA pipeline V4 |
+| --- | ---: | ---: |
+| Total latency | 62.091 ms | 3.69822 ms |
+| Filtered count | 17353 | 17353 |
+| Pillars | 16645 | 16645 |
+| Stored points | 17353 | 17353 |
+| Feature values | 14980500 | skipped copy-back |
+| BEV values | 1928448 | skipped copy-back |
+| Speedup | - | 16.7895x |
+
+V4 completes the current GPU-resident preprocessing path from KITTI points to BEV pseudo-image generation. The benchmark keeps both the feature tensor and BEV pseudo-image on the device, which removes the large intermediate CPU/GPU round trips present in the modular CUDA wrappers.
+
 ## Repository Layout
 
 ```text
@@ -642,10 +738,14 @@ The much larger V2 gain is consistent with the earlier timing breakdown: the sto
 │   ├── cuda_pillar_storage.cu
 │   ├── cuda_pipelinev1.cu
 │   ├── cuda_pipelinev2.cu
+│   ├── cuda_pipelinev3.cu
+│   ├── cuda_pipelinev4.cu
 │   ├── cuda_range_filter.cu
 │   ├── benchmark.cpp
 │   ├── benchmark_cuda_pipelinev1.cpp
 │   ├── benchmark_cuda_pipelinev2.cpp
+│   ├── benchmark_cuda_pipelinev3.cpp
+│   ├── benchmark_cuda_pipelinev4.cpp
 │   ├── benchmark_cuda_timing.cu
 │   ├── kitti_reader.cpp
 │   └── main.cpp
@@ -663,6 +763,7 @@ The much larger V2 gain is consistent with the earlier timing breakdown: the sto
 │   ├── test_cuda_pillar_storage.cpp
 │   ├── test_cuda_pipeline.cpp
 │   ├── test_cuda_pipelinev2.cpp
+│   ├── test_cuda_pipelinev3.cpp
 │   ├── test_cuda_range_filter.cpp
 │   └── test_cuda_range_filter_prefix.cpp
 └── data/
@@ -673,7 +774,7 @@ The much larger V2 gain is consistent with the earlier timing breakdown: the sto
 
 Planned optimization stages:
 
-1. Extend the GPU-resident pipeline to pillar feature generation.
-2. Extend the GPU-resident pipeline to BEV pseudo-image generation.
-3. Use Nsight Systems or Nsight Compute to inspect the remaining bottlenecks.
+1. Add a small correctness/debug path for V4 that copies BEV output back on small hand-written inputs and compares against the CPU BEV baseline.
+2. Use Nsight Systems or Nsight Compute to inspect the remaining bottlenecks inside the GPU-resident V4 pipeline.
+3. Replace repeated per-call allocations with a reusable CUDA workspace.
 4. Run benchmark results on more KITTI frames and report average latency.

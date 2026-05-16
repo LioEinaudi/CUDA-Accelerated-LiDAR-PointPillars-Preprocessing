@@ -232,6 +232,20 @@ target_include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+add_executable(test_cuda_pipelinev3
+    tests/test_cuda_pipelinev3.cpp
+    src/cuda_pipelinev3.cu
+    src/cpu_pillar_storage.cpp
+    src/cpu_pillar_scatter.cpp
+    src/cpu_pillar.cpp
+    src/cpu_range_filter.cpp
+)
+
+target_include_directories(
+    test_cuda_pipelinev3 PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
 add_executable(benchmark_cuda_pipelinev1
     src/benchmark_cuda_pipelinev1.cpp
     src/kitti_reader.cpp
@@ -265,5 +279,46 @@ add_executable(benchmark_cuda_pipelinev2
 
 target_include_directories(
     benchmark_cuda_pipelinev2 PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_executable(benchmark_cuda_pipelinev3
+    src/benchmark_cuda_pipelinev3.cpp
+    src/kitti_reader.cpp
+    src/cpu_range_filter.cpp
+    src/cpu_pillar_storage.cpp
+    src/cpu_pillar_scatter.cpp
+    src/cpu_pillar.cpp
+    src/cuda_range_filter.cu
+    src/cuda_pillar_coord.cu
+    src/cuda_pillar_scatter.cu
+    src/cuda_pillar_storage.cu
+    src/cuda_feature.cu
+    src/cuda_pipelinev3.cu
+)
+
+target_include_directories(
+    benchmark_cuda_pipelinev3 PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_executable(benchmark_cuda_pipelinev4
+    src/benchmark_cuda_pipelinev4.cpp
+    src/kitti_reader.cpp
+    src/cpu_range_filter.cpp
+    src/cpu_pillar_storage.cpp
+    src/cpu_pillar_scatter.cpp
+    src/cpu_pillar.cpp
+    src/cuda_range_filter.cu
+    src/cuda_pillar_coord.cu
+    src/cuda_pillar_scatter.cu
+    src/cuda_pillar_storage.cu
+    src/cuda_feature.cu
+    src/cuda_bev.cu
+    src/cuda_pipelinev4.cu
+)
+
+target_include_directories(
+    benchmark_cuda_pipelinev4 PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
