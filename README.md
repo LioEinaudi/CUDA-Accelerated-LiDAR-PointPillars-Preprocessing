@@ -350,12 +350,17 @@ build/test_cuda_bev
 build/test_cuda_pipelinev1
 build/test_cuda_pipelinev2
 build/test_cuda_pipelinev3
+build/test_cuda_pipelinev4
 build/benchmark
 build/benchmark_cuda_timing
 build/benchmark_cuda_pipelinev1
 build/benchmark_cuda_pipelinev2
 build/benchmark_cuda_pipelinev3
 build/benchmark_cuda_pipelinev4
+build/benchmark_multi_frame
+build/profile_cuda_modular_v4
+build/profile_cuda_pipeline_v4
+build/validate_cuda_pipelinev4_kitti
 ```
 
 ## Run
@@ -396,6 +401,55 @@ Run the GPU-resident pipeline benchmarks:
 ./build/benchmark_cuda_pipelinev4 data/000000.bin
 ```
 
+Run full-frame V4 correctness validation:
+
+```bash
+./build/validate_cuda_pipelinev4_kitti data/000000.bin
+```
+
+Generate synthetic KITTI-format multi-frame data:
+
+```bash
+python3 make_data.py
+```
+
+This writes gradient test frames to:
+
+```text
+data/synthetic/
+```
+
+Run the multi-frame benchmark:
+
+```bash
+./build/benchmark_multi_frame data/synthetic
+```
+
+Run Nsight Systems profile targets:
+
+```bash
+mkdir -p results/nsight
+nsys profile -o results/nsight/profile_cuda_modular_v4 ./build/profile_cuda_modular_v4 data/000000.bin 5
+nsys profile -o results/nsight/profile_cuda_pipeline_v4 ./build/profile_cuda_pipeline_v4 data/000000.bin 5
+```
+
+The synthetic frames are designed as a controlled workload gradient rather than a real KITTI replacement. The generator increases total point count, in-range point ratio, and clustered in-range density across 10 frames:
+
+| Frame | Total Points | In-range Ratio | Clustered In-range Ratio |
+| --- | ---: | ---: | ---: |
+| `000000.bin` | 60000 | 0.35 | 0.10 |
+| `000001.bin` | 70000 | 0.40 | 0.15 |
+| `000002.bin` | 80000 | 0.45 | 0.20 |
+| `000003.bin` | 90000 | 0.50 | 0.25 |
+| `000004.bin` | 100000 | 0.55 | 0.30 |
+| `000005.bin` | 110000 | 0.60 | 0.35 |
+| `000006.bin` | 120000 | 0.65 | 0.40 |
+| `000007.bin` | 130000 | 0.70 | 0.45 |
+| `000008.bin` | 140000 | 0.75 | 0.50 |
+| `000009.bin` | 150000 | 0.80 | 0.55 |
+
+This synthetic set is useful for validating benchmark stability and latency aggregation under gradually increasing preprocessing load. Real KITTI multi-frame evaluation is still the better final benchmark for reporting dataset-level performance.
+
 ## Tests
 
 The current test targets use hand-written points instead of reading KITTI files.
@@ -432,6 +486,10 @@ The current test targets use hand-written points instead of reading KITTI files.
 
 `test_cuda_pipelinev3` verifies that the GPU-resident pipeline can extend through pillar feature generation while preserving the filtered count, pillar count, and stored point count. The full feature tensor is intentionally not copied back in the pipeline benchmark path.
 
+`test_cuda_pipelinev4` uses a small deterministic point cloud and a debug V4 path that copies BEV output back to CPU, then compares the full BEV pseudo-image against the CPU baseline.
+
+`validate_cuda_pipelinev4_kitti` runs the same V4 debug validation on a full KITTI-style frame. This tool is intended for manual correctness validation because it depends on local point cloud data and copies the full BEV output back to host memory.
+
 The CUDA tests have been validated on a local NVIDIA GeForce RTX 4060 Laptop GPU. The tests still handle environments without a visible CUDA device by printing a skip message and exiting successfully.
 
 Build and run:
@@ -454,12 +512,15 @@ cmake --build build
 ./build/test_cuda_pipelinev1
 ./build/test_cuda_pipelinev2
 ./build/test_cuda_pipelinev3
+./build/test_cuda_pipelinev4
 ./build/benchmark data/000000.bin
 ./build/benchmark_cuda_timing data/000000.bin
 ./build/benchmark_cuda_pipelinev1 data/000000.bin
 ./build/benchmark_cuda_pipelinev2 data/000000.bin
 ./build/benchmark_cuda_pipelinev3 data/000000.bin
 ./build/benchmark_cuda_pipelinev4 data/000000.bin
+./build/benchmark_multi_frame data/synthetic
+./build/validate_cuda_pipelinev4_kitti data/000000.bin
 ```
 
 Expected output:
@@ -481,6 +542,8 @@ test_cuda_bev passed
 test_cuda_pipeline passed
 test_cuda_pipelinev2 passed
 test_cuda_pipelinev3 passed
+test_cuda_pipelinev4 passed
+validate_cuda_pipelinev4_kitti passed
 ```
 
 ## Benchmark: Stage-wise Wrapper-level Latency
@@ -578,6 +641,8 @@ BEV pseudo-image generation
 ```
 
 The pipeline benchmarks are validated against CPU reference summary counts before comparing latency. V3 and V4 intentionally keep large intermediate tensors on the GPU: V3 skips full feature D2H copy-back, and V4 skips both full feature and BEV D2H copy-back. Therefore, these speedups compare GPU-resident preprocessing latency against modular CUDA wrapper latency, not full host-visible output export latency.
+
+For correctness, V4 also has a separate debug validation path. The benchmark path keeps BEV on GPU, while the debug path copies the BEV pseudo-image back to CPU and compares it against the CPU BEV baseline on both a small deterministic input and an optional full KITTI-style frame.
 
 Summary on one KITTI-style frame:
 
@@ -706,6 +771,105 @@ Result on the same KITTI-style frame:
 
 V4 completes the current GPU-resident preprocessing path from KITTI points to BEV pseudo-image generation. The benchmark keeps both the feature tensor and BEV pseudo-image on the device, which removes the large intermediate CPU/GPU round trips present in the modular CUDA wrappers.
 
+The separate full-frame V4 debug validation copies the complete BEV pseudo-image back to CPU and compares it against the CPU BEV baseline:
+
+```text
+Loaded points: 120000
+CPU filtered count: 17353
+CUDA filtered count: 17353
+CPU pillars: 16645
+CUDA pillars: 16645
+CPU stored points: 17353
+CUDA stored points: 17353
+BEV values: 1928448
+Max abs diff: 3.8147e-06
+Tolerance: 0.001
+validate_cuda_pipelinev4_kitti passed
+```
+
+This keeps the performance benchmark and correctness validation separate: the benchmark path measures GPU-resident latency without full BEV export, while the debug validation path proves that the generated BEV values match the CPU baseline within floating-point tolerance.
+
+### Synthetic Multi-frame Benchmark
+
+A synthetic KITTI-format 10-frame gradient set is generated by `make_data.py` under `data/synthetic/`. This is a controlled workload test, not a replacement for real KITTI multi-frame evaluation. The gradient increases total points, in-range points, and pillar density across frames while keeping the number of unique pillars below the current `max_pillars = 20000` benchmark capacity.
+
+Run:
+
+```bash
+python3 make_data.py
+cmake --build build --target benchmark_multi_frame
+./build/benchmark_multi_frame ./data/synthetic
+```
+
+Synthetic workload gradient result on the same local NVIDIA GeForce RTX 4060 Laptop GPU:
+
+| Frame | Points | Filtered | Pillars | CPU Full ms | CUDA Modular V4 ms | CUDA Pipeline V4 ms | Speedup |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `000000.bin` | 60000 | 21000 | 3263 | 12.6746 | 14.2545 | 3.38861 | 4.20659x |
+| `000001.bin` | 70000 | 28000 | 4337 | 15.3616 | 17.2542 | 3.46318 | 4.9822x |
+| `000002.bin` | 80000 | 36000 | 5560 | 19.3257 | 20.4814 | 3.44754 | 5.94087x |
+| `000003.bin` | 90000 | 45000 | 6963 | 21.1955 | 22.0269 | 3.56 | 6.18732x |
+| `000004.bin` | 100000 | 55000 | 8470 | 24.2914 | 25.9473 | 3.60094 | 7.20569x |
+| `000005.bin` | 110000 | 66000 | 10133 | 29.235 | 29.9599 | 3.65932 | 8.18729x |
+| `000006.bin` | 120000 | 78000 | 11928 | 34.2948 | 35.0616 | 3.6629 | 9.57209x |
+| `000007.bin` | 130000 | 91000 | 13758 | 39.5433 | 39.4106 | 3.77305 | 10.4453x |
+| `000008.bin` | 140000 | 105000 | 15527 | 52.3337 | 47.9643 | 3.94112 | 12.1702x |
+| `000009.bin` | 150000 | 120000 | 17460 | 56.0272 | 54.2256 | 4.00711 | 13.5323x |
+
+Summary:
+
+| Pipeline | Avg ms | Min ms | Max ms |
+| --- | ---: | ---: | ---: |
+| CPU full | 30.4283 | 12.6746 | 56.0272 |
+| CUDA modular V4 | 30.6586 | 14.2545 | 54.2256 |
+| CUDA pipeline V4 | 3.65038 | 3.38861 | 4.00711 |
+
+| Metric | Avg | Min | Max |
+| --- | ---: | ---: | ---: |
+| Points | 105000 | 60000 | 150000 |
+| Filtered points | 64500 | 21000 | 120000 |
+| Pillars | 9739.9 | 3263 | 17460 |
+| Stored points | 63685.6 | 20605 | 118103 |
+
+Average speedup over CUDA modular V4 is `8.24299x`, with a range from `4.20659x` to `13.5323x`. The pipeline latency remains relatively stable because intermediate feature and BEV tensors stay on GPU and full D2H export is skipped, while the modular wrapper repeatedly moves large intermediate buffers across the CPU/GPU boundary.
+
+## Nsight Systems Profiling
+
+Nsight Systems was used to compare the modular CUDA V4 path with the GPU-resident pipeline V4 path. Two dedicated profile targets isolate each path:
+
+```text
+profile_cuda_modular_v4
+profile_cuda_pipeline_v4
+```
+
+The modular V4 profile runs the standalone CUDA wrappers repeatedly:
+
+```text
+cudaRangeFilterPrefixSum
+cudaComputePillarCoords
+cudaPillarScatter
+cudaBuildPillarPointStorage
+cudaGeneratePillarFeatures
+cudaBuildBevPseudoImage
+```
+
+The pipeline V4 profile repeatedly runs:
+
+```text
+cudaPreprocessPipelineV4
+```
+
+Both profiles were captured with 5 repeats on the same local NVIDIA GeForce RTX 4060 Laptop GPU.
+
+| Profile | Kernel Timeline | Memory Timeline | HtoD Memcpy | DtoH Memcpy | Key Observation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| CUDA modular V4 | 0.6% | 99.4% | 47.0% | 51.6% | Dominated by repeated intermediate H2D/D2H transfers and wrapper memory operations. |
+| CUDA pipeline V4 | 21.7% | 78.3% | 34.4% | 1.9% | Full feature and BEV copy-back are removed; DtoH traffic drops sharply. |
+
+The modular V4 timeline is almost entirely memory-transfer dominated. CUDA kernels account for only about `0.6%` of the captured GPU timeline, while HtoD and DtoH memory copies account for most of the activity. This matches the wrapper-level benchmark: the modular implementation repeatedly moves intermediate tensors between CPU and GPU after each stage.
+
+The GPU-resident V4 timeline is more compact. Kernel share rises to about `21.7%`, and DtoH memcpy drops from about `51.6%` to about `1.9%`, because the feature tensor and BEV pseudo-image stay on the GPU during latency measurement. The remaining memory activity is mostly input H2D transfer and device-side initialization, especially `cudaMemset`, which points to the next optimization step: a reusable CUDA workspace and more careful buffer initialization.
+
 ## Repository Layout
 
 ```text
@@ -747,8 +911,12 @@ V4 completes the current GPU-resident preprocessing path from KITTI points to BE
 │   ├── benchmark_cuda_pipelinev3.cpp
 │   ├── benchmark_cuda_pipelinev4.cpp
 │   ├── benchmark_cuda_timing.cu
+│   ├── benchmark_multi_frame.cpp
 │   ├── kitti_reader.cpp
-│   └── main.cpp
+│   ├── main.cpp
+│   ├── profile_cuda_modular_v4.cpp
+│   ├── profile_cuda_pipeline_v4.cpp
+│   └── validate_cuda_pipelinev4_kitti.cpp
 ├── tests/
 │   ├── test_cpu_bev.cpp
 │   ├── test_cpu_feature.cpp
@@ -764,6 +932,7 @@ V4 completes the current GPU-resident preprocessing path from KITTI points to BE
 │   ├── test_cuda_pipeline.cpp
 │   ├── test_cuda_pipelinev2.cpp
 │   ├── test_cuda_pipelinev3.cpp
+│   ├── test_cuda_pipelinev4.cpp
 │   ├── test_cuda_range_filter.cpp
 │   └── test_cuda_range_filter_prefix.cpp
 └── data/
@@ -774,7 +943,7 @@ V4 completes the current GPU-resident preprocessing path from KITTI points to BE
 
 Planned optimization stages:
 
-1. Add a small correctness/debug path for V4 that copies BEV output back on small hand-written inputs and compares against the CPU BEV baseline.
-2. Use Nsight Systems or Nsight Compute to inspect the remaining bottlenecks inside the GPU-resident V4 pipeline.
-3. Replace repeated per-call allocations with a reusable CUDA workspace.
-4. Run benchmark results on more KITTI frames and report average latency.
+1. Replace repeated per-call allocations with a reusable CUDA workspace.
+2. Reduce or combine repeated device buffer initialization, especially large `cudaMemset` calls.
+3. Run benchmark results on real KITTI multi-frame data and report average latency.
+4. Add optional full BEV export timing to separate GPU-resident latency from host-visible output latency.

@@ -280,22 +280,27 @@ namespace
         int bev_index = (channel * height + coord.y) * width + coord.x;
         bev[bev_index] = mean;
     }
-}
-
-CudaPipelineSummary cudaPreprocessPipelineV4(const std::vector<PointXYZI> &points, const RangeConfig &range, const PillarConfig &pillar)
-{
+    CudaPipelineV4DebugResult cudaPreprocessPipelineV4Impl(
+        const std::vector<PointXYZI> &points,
+        const RangeConfig &range,
+        const PillarConfig &pillar,
+        bool copy_bev)
+    {
+    CudaPipelineV4DebugResult debug_result;
     if (points.empty())
-        return {};
+        return debug_result;
     int num_points = points.size();
     int grid_x = getGridX(range, pillar);
     int grid_y = getGridY(range, pillar);
-    CudaPipelineSummary result;
-    // V4 keeps the BEV pseudo-image on GPU for resident pipeline benchmarking.
-    // BevPseudoImage bev;
-    // bev.channels = kPillarFeatureDim;
-    // bev.height = grid_y;
-    // bev.width = grid_x;
-    // bev.data.resize(kPillarFeatureDim * grid_x * grid_y, 0.0f);
+    CudaPipelineSummary &result = debug_result.summary;
+
+    if (copy_bev)
+    {
+        debug_result.bev.channels = kPillarFeatureDim;
+        debug_result.bev.height = grid_y;
+        debug_result.bev.width = grid_x;
+        debug_result.bev.data.resize(kPillarFeatureDim * grid_x * grid_y, 0.0f);
+    }
 
     PointXYZI *d_input_points = nullptr;
     size_t points_bytes = sizeof(PointXYZI) * num_points;
@@ -399,7 +404,7 @@ CudaPipelineSummary cudaPreprocessPipelineV4(const std::vector<PointXYZI> &point
         checkCuda(cudaFree(d_mean_y), "cudaFree d_mean_y failed");
         checkCuda(cudaFree(d_mean_z), "cudaFree d_mean_z failed");
         checkCuda(cudaFree(d_bev), "cudaFree d_bev failed");
-        return result;
+        return debug_result;
     }
 
     int filtered_blocks = (result.filtered_count + threads - 1) / threads;
@@ -439,7 +444,11 @@ CudaPipelineSummary cudaPreprocessPipelineV4(const std::vector<PointXYZI> &point
     pipelineBuildBevPseudoImageKernel<<<bev_blocks, threads>>>(d_features, d_pillars, d_pillar_point_count, result.num_pillars, pillar.max_points_per_pillar, kPillarFeatureDim, grid_y, grid_x, d_bev);
     checkCuda(cudaGetLastError(), "pipelineBuildBevPseudoImageKernel launch failed");
     checkCuda(cudaDeviceSynchronize(), "pipelineBuildBevPseudoImageKernel failed");
-    // checkCuda(cudaMemcpy(bev.data.data(), d_bev, sizeof(float) * kPillarFeatureDim * grid_y * grid_x, cudaMemcpyDeviceToHost), "cudaMemcpy bev D2H failed");
+
+    if (copy_bev)
+    {
+        checkCuda(cudaMemcpy(debug_result.bev.data.data(), d_bev, sizeof(float) * kPillarFeatureDim * grid_y * grid_x, cudaMemcpyDeviceToHost), "cudaMemcpy bev D2H failed");
+    }
 
     // V4 benchmark skips full feature D2H copy.
     // std::vector<float> h_features(result.num_pillars * pillar.max_points_per_pillar * kPillarFeatureDim);
@@ -464,5 +473,16 @@ CudaPipelineSummary cudaPreprocessPipelineV4(const std::vector<PointXYZI> &point
     checkCuda(cudaFree(d_mean_y), "cudaFree d_mean_y failed");
     checkCuda(cudaFree(d_mean_z), "cudaFree d_mean_z failed");
     checkCuda(cudaFree(d_bev), "cudaFree d_bev failed");
-    return result;
+    return debug_result;
+    }
+}
+
+CudaPipelineSummary cudaPreprocessPipelineV4(const std::vector<PointXYZI> &points, const RangeConfig &range, const PillarConfig &pillar)
+{
+    return cudaPreprocessPipelineV4Impl(points, range, pillar, false).summary;
+}
+
+CudaPipelineV4DebugResult cudaPreprocessPipelineV4Debug(const std::vector<PointXYZI> &points, const RangeConfig &range, const PillarConfig &pillar)
+{
+    return cudaPreprocessPipelineV4Impl(points, range, pillar, true);
 }
