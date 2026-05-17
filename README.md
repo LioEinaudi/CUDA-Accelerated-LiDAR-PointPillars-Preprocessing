@@ -27,6 +27,8 @@ Measured on a local NVIDIA GeForce RTX 4060 Laptop GPU:
 - 10-frame synthetic benchmark: `3.65 ms` average GPU-resident V4 latency, `8.24x` average speedup over modular CUDA V4
 - Nsight Systems: DtoH timeline share reduced from `51.6%` in modular V4 to `1.9%` in GPU-resident V4; workspace benchmark profile shows `2.7%` DtoH with remaining cost mostly in H2D and memset.
 
+Workspace V4 latency is measured as repeated preprocessing calls after workspace creation. Workspace setup and destruction are lifecycle costs and are not included in the steady-state per-frame latency.
+
 ## Current Pipeline
 
 ```text
@@ -698,6 +700,8 @@ Result on the same KITTI-style frame, averaged over 20 repeats:
 | Speedup | - | 7.78635x |
 
 This result suggests that repeated `cudaMalloc`/`cudaFree` and broad temporary-buffer initialization were still significant in the normal GPU-resident path. After moving allocations into a reusable workspace and removing unnecessary feature-tensor memset, the repeated-call V4 path drops below 0.5 ms on this frame. This benchmark still keeps feature and BEV tensors on GPU, so it measures GPU-resident preprocessing latency rather than full host-visible BEV export latency.
+
+The reported workspace latency is the steady-state repeated-call cost after `createCudaPreprocessWorkspace` has already allocated the device buffers. Workspace creation and destruction are treated as lifecycle costs outside the per-frame timing loop.
 
 ### Pipeline V1
 
