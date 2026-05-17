@@ -2,7 +2,8 @@ build/
 explanation/
 node_modules/
 
-data/*.bin
+data/
+results/
 
 *.o
 *.a

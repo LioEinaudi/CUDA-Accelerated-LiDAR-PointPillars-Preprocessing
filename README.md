@@ -14,6 +14,19 @@ The project is developed with an emphasis on correctness, benchmark transparency
 - Detailed CUDA timing breakdown that separates wrapper-level costs from measured kernel/GPU execution time.
 - GPU-resident CUDA pipeline prototypes that keep intermediate tensors on device and reduce CPU/GPU round trips.
 
+## Performance Summary
+
+Measured on a local NVIDIA GeForce RTX 4060 Laptop GPU:
+
+- Modular CUDA V4 wrapper latency: `62.09 ms`
+- GPU-resident V4 pipeline latency: `3.70 ms`
+- Pipeline-level latency reduction: `16.79x`
+- Workspace V4 repeated-call latency: `0.485 ms`
+- Workspace V4 speedup over normal GPU-resident V4: `7.79x`
+- Full-frame V4 BEV validation: max absolute difference `3.8147e-06` vs CPU baseline
+- 10-frame synthetic benchmark: `3.65 ms` average GPU-resident V4 latency, `8.24x` average speedup over modular CUDA V4
+- Nsight Systems: DtoH timeline share reduced from `51.6%` in modular V4 to `1.9%` in GPU-resident V4; workspace benchmark profile shows `2.7%` DtoH with remaining cost mostly in H2D and memset.
+
 ## Current Pipeline
 
 ```text
@@ -351,12 +364,14 @@ build/test_cuda_pipelinev1
 build/test_cuda_pipelinev2
 build/test_cuda_pipelinev3
 build/test_cuda_pipelinev4
+build/test_cuda_workspace_v4
 build/benchmark
 build/benchmark_cuda_timing
 build/benchmark_cuda_pipelinev1
 build/benchmark_cuda_pipelinev2
 build/benchmark_cuda_pipelinev3
 build/benchmark_cuda_pipelinev4
+build/benchmark_cuda_workspace_v4
 build/benchmark_multi_frame
 build/profile_cuda_modular_v4
 build/profile_cuda_pipeline_v4
@@ -399,6 +414,7 @@ Run the GPU-resident pipeline benchmarks:
 ./build/benchmark_cuda_pipelinev2 data/000000.bin
 ./build/benchmark_cuda_pipelinev3 data/000000.bin
 ./build/benchmark_cuda_pipelinev4 data/000000.bin
+./build/benchmark_cuda_workspace_v4 data/000000.bin
 ```
 
 Run full-frame V4 correctness validation:
@@ -431,6 +447,7 @@ Run Nsight Systems profile targets:
 mkdir -p results/nsight
 nsys profile -o results/nsight/profile_cuda_modular_v4 ./build/profile_cuda_modular_v4 data/000000.bin 5
 nsys profile -o results/nsight/profile_cuda_pipeline_v4 ./build/profile_cuda_pipeline_v4 data/000000.bin 5
+nsys profile -o results/nsight/benchmark_cuda_workspace_v4 ./build/benchmark_cuda_workspace_v4 data/000000.bin
 ```
 
 The synthetic frames are designed as a controlled workload gradient rather than a real KITTI replacement. The generator increases total point count, in-range point ratio, and clustered in-range density across 10 frames:
@@ -488,6 +505,8 @@ The current test targets use hand-written points instead of reading KITTI files.
 
 `test_cuda_pipelinev4` uses a small deterministic point cloud and a debug V4 path that copies BEV output back to CPU, then compares the full BEV pseudo-image against the CPU baseline.
 
+`test_cuda_workspace_v4` verifies that the reusable workspace V4 path produces the same filtered count, pillar count, and stored point count as the normal V4 pipeline on a small deterministic point cloud.
+
 `validate_cuda_pipelinev4_kitti` runs the same V4 debug validation on a full KITTI-style frame. This tool is intended for manual correctness validation because it depends on local point cloud data and copies the full BEV output back to host memory.
 
 The CUDA tests have been validated on a local NVIDIA GeForce RTX 4060 Laptop GPU. The tests still handle environments without a visible CUDA device by printing a skip message and exiting successfully.
@@ -513,12 +532,14 @@ cmake --build build
 ./build/test_cuda_pipelinev2
 ./build/test_cuda_pipelinev3
 ./build/test_cuda_pipelinev4
+./build/test_cuda_workspace_v4
 ./build/benchmark data/000000.bin
 ./build/benchmark_cuda_timing data/000000.bin
 ./build/benchmark_cuda_pipelinev1 data/000000.bin
 ./build/benchmark_cuda_pipelinev2 data/000000.bin
 ./build/benchmark_cuda_pipelinev3 data/000000.bin
 ./build/benchmark_cuda_pipelinev4 data/000000.bin
+./build/benchmark_cuda_workspace_v4 data/000000.bin
 ./build/benchmark_multi_frame data/synthetic
 ./build/validate_cuda_pipelinev4_kitti data/000000.bin
 ```
@@ -543,6 +564,7 @@ test_cuda_pipeline passed
 test_cuda_pipelinev2 passed
 test_cuda_pipelinev3 passed
 test_cuda_pipelinev4 passed
+test_cuda_workspace_v4 passed
 validate_cuda_pipelinev4_kitti passed
 ```
 
@@ -652,6 +674,30 @@ Summary on one KITTI-style frame:
 | V2 | + storage | 12.1325 | 1.63467 | 7.42194x |
 | V3 | + feature | 44.2121 | 4.10545 | 10.7691x |
 | V4 | + BEV | 62.091 | 3.69822 | 16.7895x |
+
+### Workspace V4
+
+The first V4 pipeline still allocates and frees its temporary device buffers inside each call. `cudaPreprocessPipelineV4Workspace` moves those buffers into a reusable workspace so repeated preprocessing calls can reuse the same device memory:
+
+```text
+createCudaPreprocessWorkspace
+  -> cudaPreprocessPipelineV4Workspace repeated N times
+  -> destroyCudaPreprocessWorkspace
+```
+
+This does not change the logical preprocessing result. It changes the lifetime of temporary buffers such as input points, filtered points, pillar metadata, pillar storage, feature tensors, and BEV output.
+
+Result on the same KITTI-style frame, averaged over 20 repeats:
+
+| Metric | Normal Pipeline V4 | Workspace Pipeline V4 |
+| --- | ---: | ---: |
+| Average latency | 3.77505 ms | 0.48483 ms |
+| Filtered count | 17353 | 17353 |
+| Pillars | 16645 | 16645 |
+| Stored points | 17353 | 17353 |
+| Speedup | - | 7.78635x |
+
+This result suggests that repeated `cudaMalloc`/`cudaFree` and broad temporary-buffer initialization were still significant in the normal GPU-resident path. After moving allocations into a reusable workspace and removing unnecessary feature-tensor memset, the repeated-call V4 path drops below 0.5 ms on this frame. This benchmark still keeps feature and BEV tensors on GPU, so it measures GPU-resident preprocessing latency rather than full host-visible BEV export latency.
 
 ### Pipeline V1
 
@@ -865,10 +911,13 @@ Both profiles were captured with 5 repeats on the same local NVIDIA GeForce RTX 
 | --- | ---: | ---: | ---: | ---: | --- |
 | CUDA modular V4 | 0.6% | 99.4% | 47.0% | 51.6% | Dominated by repeated intermediate H2D/D2H transfers and wrapper memory operations. |
 | CUDA pipeline V4 | 21.7% | 78.3% | 34.4% | 1.9% | Full feature and BEV copy-back are removed; DtoH traffic drops sharply. |
+| CUDA workspace V4 benchmark | 25.6% | 74.4% | 48.7% | 2.7% | Reused workspace keeps DtoH low; remaining memory activity is mostly input H2D and device-side initialization. |
 
 The modular V4 timeline is almost entirely memory-transfer dominated. CUDA kernels account for only about `0.6%` of the captured GPU timeline, while HtoD and DtoH memory copies account for most of the activity. This matches the wrapper-level benchmark: the modular implementation repeatedly moves intermediate tensors between CPU and GPU after each stage.
 
 The GPU-resident V4 timeline is more compact. Kernel share rises to about `21.7%`, and DtoH memcpy drops from about `51.6%` to about `1.9%`, because the feature tensor and BEV pseudo-image stay on the GPU during latency measurement. The remaining memory activity is mostly input H2D transfer and device-side initialization, especially `cudaMemset`, which points to the next optimization step: a reusable CUDA workspace and more careful buffer initialization.
+
+The workspace V4 profile continues that direction. The captured benchmark still contains workspace setup and comparison code, so CUDA API activity such as `cudaMalloc` can still appear in the timeline. The repeated workspace path itself reuses preallocated buffers, and the profile shows DtoH staying low at about `2.7%`. The remaining visible memory work is mostly HtoD input upload and memset. That makes the next likely optimization target buffer clearing: reducing full-buffer `cudaMemset` calls with active-pillar clearing, touched-cell lists, or generation counters.
 
 ## Repository Layout
 
@@ -886,6 +935,7 @@ The GPU-resident V4 timeline is more compact. Kernel share rises to about `21.7%
 │   ├── cpu_preprocess.hpp
 │   ├── cuda_pipeline.cuh
 │   ├── cuda_preprocess.cuh
+│   ├── cuda_workspace.cuh
 │   ├── kitti_reader.hpp
 │   └── point.hpp
 ├── src/
@@ -905,12 +955,14 @@ The GPU-resident V4 timeline is more compact. Kernel share rises to about `21.7%
 │   ├── cuda_pipelinev3.cu
 │   ├── cuda_pipelinev4.cu
 │   ├── cuda_range_filter.cu
+│   ├── cuda_workspace.cu
 │   ├── benchmark.cpp
 │   ├── benchmark_cuda_pipelinev1.cpp
 │   ├── benchmark_cuda_pipelinev2.cpp
 │   ├── benchmark_cuda_pipelinev3.cpp
 │   ├── benchmark_cuda_pipelinev4.cpp
 │   ├── benchmark_cuda_timing.cu
+│   ├── benchmark_cuda_workspace_v4.cpp
 │   ├── benchmark_multi_frame.cpp
 │   ├── kitti_reader.cpp
 │   ├── main.cpp
@@ -933,6 +985,7 @@ The GPU-resident V4 timeline is more compact. Kernel share rises to about `21.7%
 │   ├── test_cuda_pipelinev2.cpp
 │   ├── test_cuda_pipelinev3.cpp
 │   ├── test_cuda_pipelinev4.cpp
+│   ├── test_cuda_workspace_v4.cpp
 │   ├── test_cuda_range_filter.cpp
 │   └── test_cuda_range_filter_prefix.cpp
 └── data/
@@ -941,9 +994,9 @@ The GPU-resident V4 timeline is more compact. Kernel share rises to about `21.7%
 
 ## Next Steps
 
-Planned optimization stages:
+Possible follow-up optimization stages:
 
-1. Replace repeated per-call allocations with a reusable CUDA workspace.
-2. Reduce or combine repeated device buffer initialization, especially large `cudaMemset` calls.
-3. Run benchmark results on real KITTI multi-frame data and report average latency.
-4. Add optional full BEV export timing to separate GPU-resident latency from host-visible output latency.
+1. Reduce or combine repeated device buffer initialization, especially large `cudaMemset` calls.
+2. Run benchmark results on real KITTI multi-frame data and report average latency.
+3. Add optional full BEV export timing to separate GPU-resident latency from host-visible output latency.
+4. Use Nsight Compute on the feature and BEV kernels to inspect memory throughput, occupancy, and global memory efficiency.

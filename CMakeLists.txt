@@ -262,6 +262,18 @@ target_include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+add_executable(test_cuda_workspace_v4
+    tests/test_cuda_workspace_v4.cpp
+    src/cuda_pipelinev4.cu
+    src/cuda_workspace.cu
+    src/cpu_pillar.cpp
+)
+
+target_include_directories(
+    test_cuda_workspace_v4 PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
 add_executable(benchmark_cuda_pipelinev1
     src/benchmark_cuda_pipelinev1.cpp
     src/kitti_reader.cpp
@@ -336,6 +348,19 @@ add_executable(benchmark_cuda_pipelinev4
 
 target_include_directories(
     benchmark_cuda_pipelinev4 PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_executable(benchmark_cuda_workspace_v4
+    src/benchmark_cuda_workspace_v4.cpp
+    src/kitti_reader.cpp
+    src/cuda_pipelinev4.cu
+    src/cuda_workspace.cu
+    src/cpu_pillar.cpp
+)
+
+target_include_directories(
+    benchmark_cuda_workspace_v4 PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
